@@ -5,7 +5,7 @@ Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -21,7 +21,9 @@ class ServerConfig:
     temperature: float = 0.7
     device: str = "auto"  # "auto", "cpu", "cuda"
     quantize: bool = True
-    max_concurrent: int = 1  # max concurrent inference requests
+    max_concurrent: int = 1
+    providers: list[str] = field(default_factory=lambda: ["openai"])
+    require_auth: bool = False
 
     def __post_init__(self):
         if self.served_model_name is None:

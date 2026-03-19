@@ -18,7 +18,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +69,17 @@ logger = logging.getLogger(__name__)
     default=1, type=int,
     help="Max concurrent inference requests (default: 1)",
 )
+@click.option(
+    "--providers",
+    default="openai",
+    help="Comma-separated list of API providers to enable (default: openai)",
+)
+@click.option(
+    "--require-auth",
+    is_flag=True,
+    default=False,
+    help="Require auth headers on requests (default: disabled)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -82,6 +93,8 @@ def main(
     log_level: str,
     quantize: bool,
     max_concurrent: int,
+    providers: str,
+    require_auth: bool,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -97,6 +110,8 @@ def main(
     """
     logging.getLogger().setLevel(getattr(logging, log_level.upper()))
 
+    provider_list = [p.strip() for p in providers.split(",")]
+
     config = ServerConfig(
         model_name=model,
         served_model_name=served_model_name,
@@ -108,16 +123,20 @@ def main(
         device=device.lower(),
         quantize=quantize,
         max_concurrent=max_concurrent,
+        providers=provider_list,
+        require_auth=require_auth,
     )
 
     click.echo(f"LLM Katan v{__version__}")
-    click.echo(f"  Model:    {config.model_name}")
-    click.echo(f"  Served:   {config.served_model_name}")
-    click.echo(f"  Backend:  {config.backend}")
-    click.echo(f"  Device:   {config.device_auto}")
+    click.echo(f"  Model:     {config.model_name}")
+    click.echo(f"  Served:    {config.served_model_name}")
+    click.echo(f"  Backend:   {config.backend}")
+    click.echo(f"  Device:    {config.device_auto}")
     if config.device_auto == "cpu":
-        click.echo(f"  Quantize: {'enabled' if config.quantize else 'disabled'}")
-    click.echo(f"  Server:   http://{config.host}:{config.port}")
+        click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
+    click.echo(f"  Providers: {', '.join(config.providers)}")
+    click.echo(f"  Auth:      {'required' if config.require_auth else 'disabled'}")
+    click.echo(f"  Server:    http://{config.host}:{config.port}")
     click.echo()
 
     if config.backend == "vllm":

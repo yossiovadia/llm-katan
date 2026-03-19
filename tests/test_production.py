@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from llm_katan.config import ServerConfig
 from llm_katan.model import ModelBackend
+from llm_katan.providers.openai import OpenAIProvider
 from llm_katan.server import ServerMetrics, create_app
 
 
@@ -44,16 +45,22 @@ class MockBackend(ModelBackend):
         }
 
 
-def make_app(max_concurrent=1, latency=0):
+def make_app(max_concurrent=1, latency=0, require_auth=False):
     config = ServerConfig(
         model_name="test-model",
         served_model_name="gpt-test",
         port=8000,
         max_concurrent=max_concurrent,
+        providers=["openai"],
+        require_auth=require_auth,
     )
     app = create_app(config)
-    app.state.backend = MockBackend(config, latency=latency)
+    backend = MockBackend(config, latency=latency)
+    app.state.backend = backend
     app.state.metrics = ServerMetrics()
+
+    provider = OpenAIProvider(backend=backend, require_auth=require_auth)
+    provider.register_routes(app)
     return app
 
 

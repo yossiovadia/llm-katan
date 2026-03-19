@@ -10,7 +10,6 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
 
 from .config import ServerConfig
 
@@ -35,11 +34,21 @@ class ModelBackend(ABC):
         max_tokens: int,
         temperature: float,
     ) -> tuple[str, int, int]:
-        """Generate text from messages.
+        """Generate text from messages. Subclasses implement this.
 
         Returns:
             (generated_text, prompt_tokens, completion_tokens)
         """
+
+    async def generate_text(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple[str, int, int]:
+        """Generate text with concurrency control. Called by providers."""
+        async with self._semaphore:
+            return await self._generate_text(messages, max_tokens, temperature)
 
     def get_model_info(self) -> dict[str, any]:
         """Get model information."""
@@ -77,88 +86,6 @@ class ModelBackend(ABC):
                 parts.append(f"Assistant: {content}")
         parts.append("Assistant:")
         return "\n".join(parts)
-
-    async def generate(
-        self,
-        messages: list[dict[str, str]],
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        stream: bool = False,
-    ) -> AsyncGenerator[dict, None]:
-        """Generate response with concurrency control."""
-        max_tokens = max_tokens if max_tokens is not None else self.config.max_tokens
-        temperature = temperature if temperature is not None else self.config.temperature
-
-        async with self._semaphore:
-            generated_text, prompt_tokens, completion_tokens = await self._generate_text(
-                messages, max_tokens, temperature
-            )
-
-        response_id = f"chatcmpl-{int(time.time() * 1000)}"
-        created = int(time.time())
-        model_name = self.config.served_model_name
-
-        if stream:
-            # Stream character-by-character for realistic streaming
-            chunk_size = 4  # characters per chunk
-            for i in range(0, len(generated_text), chunk_size):
-                chunk_text = generated_text[i : i + chunk_size]
-                yield {
-                    "id": response_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": chunk_text},
-                            "logprobs": None,
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-
-            # Final chunk with finish_reason and usage
-            yield {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "logprobs": None,
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens,
-                },
-            }
-        else:
-            yield {
-                "id": response_id,
-                "object": "chat.completion",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": generated_text},
-                        "logprobs": None,
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens,
-                },
-            }
-
 
 class TransformersBackend(ModelBackend):
     """HuggingFace Transformers backend."""
