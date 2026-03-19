@@ -402,6 +402,203 @@ class TestInvokeGeneric:
 
 
 # ============================================================
+# InvokeModel — Meta Llama format
+# ============================================================
+
+class TestInvokeMeta:
+    @pytest.mark.asyncio
+    async def test_invoke_llama(self, client):
+        resp = await client.post(
+            "/model/meta.llama3-70b-instruct-v1/invoke",
+            json={"prompt": "hello from llama", "max_gen_len": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "generation" in data
+        assert "hello from llama" in data["generation"]
+        assert data["stop_reason"] == "stop"
+        assert "prompt_token_count" in data
+        assert "generation_token_count" in data
+
+
+# ============================================================
+# InvokeModel — Cohere Command format
+# ============================================================
+
+class TestInvokeCohere:
+    @pytest.mark.asyncio
+    async def test_invoke_cohere(self, client):
+        resp = await client.post(
+            "/model/cohere.command-r-v1/invoke",
+            json={"message": "hello from cohere", "max_tokens": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "text" in data
+        assert "hello from cohere" in data["text"]
+        assert data["finish_reason"] == "COMPLETE"
+        assert data["meta"]["billed_units"]["input_tokens"] > 0
+        assert data["meta"]["billed_units"]["output_tokens"] > 0
+
+    @pytest.mark.asyncio
+    async def test_invoke_cohere_with_history(self, client):
+        resp = await client.post(
+            "/model/cohere.command-r-plus-v1/invoke",
+            json={
+                "message": "how are you",
+                "chat_history": [
+                    {"role": "USER", "message": "hello"},
+                    {"role": "CHATBOT", "message": "hi there"},
+                ],
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "how are you" in resp.json()["text"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_cohere_with_preamble(self, client):
+        resp = await client.post(
+            "/model/cohere.command-r-v1/invoke",
+            json={"message": "hi", "preamble": "You are a pirate"},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+
+# ============================================================
+# InvokeModel — Mistral format
+# ============================================================
+
+class TestInvokeMistral:
+    @pytest.mark.asyncio
+    async def test_invoke_mistral(self, client):
+        resp = await client.post(
+            "/model/mistral.mistral-7b-instruct-v0/invoke",
+            json={"prompt": "<s>[INST] hello from mistral [/INST]", "max_tokens": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "outputs" in data
+        assert isinstance(data["outputs"], list)
+        assert "text" in data["outputs"][0]
+        assert "hello from mistral" in data["outputs"][0]["text"]
+        assert data["outputs"][0]["stop_reason"] == "stop"
+
+
+# ============================================================
+# InvokeModel — DeepSeek format
+# ============================================================
+
+class TestInvokeDeepSeek:
+    @pytest.mark.asyncio
+    async def test_invoke_deepseek(self, client):
+        resp = await client.post(
+            "/model/deepseek.r1-v1/invoke",
+            json={"prompt": "hello from deepseek", "max_tokens": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "choices" in data
+        assert isinstance(data["choices"], list)
+        assert "text" in data["choices"][0]
+        assert "hello from deepseek" in data["choices"][0]["text"]
+        assert data["choices"][0]["stop_reason"] == "stop"
+
+
+# ============================================================
+# InvokeModel — AI21 Jamba format
+# ============================================================
+
+class TestInvokeAI21:
+    @pytest.mark.asyncio
+    async def test_invoke_jamba(self, client):
+        resp = await client.post(
+            "/model/ai21.jamba-instruct-v1/invoke",
+            json={
+                "messages": [{"role": "user", "content": "hello from ai21"}],
+                "max_tokens": 100,
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "choices" in data
+        assert data["choices"][0]["message"]["role"] == "assistant"
+        assert "hello from ai21" in data["choices"][0]["message"]["content"]
+        assert data["choices"][0]["finish_reason"] == "stop"
+        assert data["usage"]["prompt_tokens"] > 0
+        assert data["usage"]["total_tokens"] == data["usage"]["prompt_tokens"] + data["usage"]["completion_tokens"]
+
+
+# ============================================================
+# InvokeModel — Amazon Nova format
+# ============================================================
+
+class TestInvokeNova:
+    @pytest.mark.asyncio
+    async def test_invoke_nova(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-pro-v1/invoke",
+            json={
+                "messages": [{"role": "user", "content": [{"text": "hello from nova"}]}],
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["output"]["message"]["role"] == "assistant"
+        assert "hello from nova" in data["output"]["message"]["content"][0]["text"]
+        assert data["stopReason"] == "end_turn"
+        assert data["usage"]["inputTokens"] > 0
+
+    @pytest.mark.asyncio
+    async def test_invoke_nova_with_system(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-micro-v1/invoke",
+            json={
+                "system": [{"text": "You are helpful"}],
+                "messages": [{"role": "user", "content": [{"text": "hi"}]}],
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invoke_nova_with_config(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-lite-v1/invoke",
+            json={
+                "messages": [{"role": "user", "content": [{"text": "hi"}]}],
+                "inferenceConfig": {"maxTokens": 50, "temperature": 0.3},
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+
+# ============================================================
+# InvokeModel — Unknown model falls back to Titan
+# ============================================================
+
+class TestInvokeFallback:
+    @pytest.mark.asyncio
+    async def test_unknown_model_uses_titan_format(self, client):
+        resp = await client.post(
+            "/model/some.unknown-model-v1/invoke",
+            json={"inputText": "hello from unknown"},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "results" in resp.json()
+        assert "outputText" in resp.json()["results"][0]
+
+
+# ============================================================
 # Auth
 # ============================================================
 

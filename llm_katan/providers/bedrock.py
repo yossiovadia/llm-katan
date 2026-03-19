@@ -209,6 +209,22 @@ class BedrockProvider(Provider):
     # InvokeModel handler (Anthropic Claude format inside Bedrock)
     # ----------------------------------------------------------------
 
+    # ----------------------------------------------------------------
+    # InvokeModel dispatcher — routes to model-family-specific handler
+    # ----------------------------------------------------------------
+
+    # Model family detection: (prefix_in_model_id, handler_method_name)
+    _MODEL_FAMILIES = [
+        (("anthropic.", "claude"), "_invoke_anthropic"),
+        (("amazon.nova",), "_invoke_nova"),
+        (("meta.llama", "meta.llama"), "_invoke_meta"),
+        (("cohere.",), "_invoke_cohere"),
+        (("mistral.",), "_invoke_mistral"),
+        (("deepseek.",), "_invoke_deepseek"),
+        (("ai21.",), "_invoke_ai21"),
+        (("amazon.titan",), "_invoke_titan"),
+    ]
+
     async def _handle_invoke(self, model_id: str, raw_request: Request, app: FastAPI):
         client_ip = raw_request.client.host if raw_request.client else "unknown"
 
@@ -223,103 +239,240 @@ class BedrockProvider(Provider):
             logger.warning("bedrock invoke | %s | 400 | invalid JSON", client_ip)
             return _bedrock_error(400, "Invalid JSON in request body")
 
-        # Detect if this is an Anthropic Claude model
-        if "anthropic" in model_id.lower() or "claude" in model_id.lower():
-            return await self._invoke_anthropic(model_id, body, app, client_ip)
+        model_lower = model_id.lower()
+        for prefixes, method_name in self._MODEL_FAMILIES:
+            if any(model_lower.startswith(p) or p in model_lower for p in prefixes):
+                handler = getattr(self, method_name)
+                return await handler(model_id, body, app, client_ip)
 
-        # Default: treat as generic text model (Amazon Titan style)
-        return await self._invoke_generic(model_id, body, app, client_ip)
+        # Fallback: Amazon Titan format
+        return await self._invoke_titan(model_id, body, app, client_ip)
 
-    async def _invoke_anthropic(self, model_id: str, body: dict, app: FastAPI, client_ip: str):
-        """Handle InvokeModel for Anthropic Claude models — uses Anthropic Messages format."""
-        messages = body.get("messages")
-        if not messages:
-            logger.warning("bedrock invoke | %s | 400 | missing messages", client_ip)
-            return _bedrock_error(400, "messages: field required")
+    # ----------------------------------------------------------------
+    # Helper: run generation and record metrics
+    # ----------------------------------------------------------------
 
-        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
-        temperature = body.get("temperature", self.backend.config.temperature)
-
-        logger.info(
-            "bedrock invoke anthropic | %s | model=%s messages=%d max_tokens=%s",
-            client_ip, model_id, len(messages), max_tokens,
-        )
-
+    async def _run_invoke(self, family: str, model_id: str, backend_messages: list,
+                          max_tokens: int, temperature: float, app: FastAPI, client_ip: str):
+        """Common invoke logic: generate text, record metrics, log."""
         metrics = app.state.metrics
         start_time = time.time()
 
-        # Convert Anthropic messages to backend format
+        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+            backend_messages, max_tokens, temperature
+        )
+
+        elapsed = time.time() - start_time
+        metrics.record(elapsed, prompt_tokens, completion_tokens)
+        logger.info(
+            "bedrock invoke %s | %s | model=%s | 200 | %d tokens | %.3fs",
+            family, client_ip, model_id, prompt_tokens + completion_tokens, elapsed,
+        )
+        return generated_text, prompt_tokens, completion_tokens
+
+    def _extract_anthropic_messages(self, body: dict) -> list[dict]:
+        """Convert Anthropic-style messages to backend format."""
         backend_messages = []
         system_text = body.get("system")
         if isinstance(system_text, str) and system_text:
             backend_messages.append({"role": "system", "content": system_text})
 
-        for msg in messages:
+        for msg in body.get("messages", []):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if isinstance(content, str):
                 text = content
             elif isinstance(content, list):
                 text = "\n".join(
-                    b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
                 )
             else:
                 text = str(content)
             backend_messages.append({"role": role, "content": text})
+        return backend_messages
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-            backend_messages, max_tokens, temperature
-        )
+    # ----------------------------------------------------------------
+    # Model family handlers
+    # ----------------------------------------------------------------
 
-        elapsed = time.time() - start_time
-        metrics.record(elapsed, prompt_tokens, completion_tokens)
-        logger.info("bedrock invoke anthropic | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
+    async def _invoke_anthropic(self, model_id, body, app, client_ip):
+        """Anthropic Claude — Anthropic Messages format."""
+        messages = body.get("messages")
+        if not messages:
+            return _bedrock_error(400, "messages: field required")
 
-        # Return Anthropic Messages format (as Bedrock does for Claude)
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke anthropic | %s | model=%s messages=%d", client_ip, model_id, len(messages))
+
+        backend_messages = self._extract_anthropic_messages(body)
+        text, pt, ct = await self._run_invoke("anthropic", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
         return {
             "id": f"msg_{uuid.uuid4().hex[:24]}",
             "type": "message",
             "role": "assistant",
-            "content": [{"type": "text", "text": generated_text}],
+            "content": [{"type": "text", "text": text}],
             "model": model_id,
             "stop_reason": "end_turn",
             "stop_sequence": None,
-            "usage": {
-                "input_tokens": prompt_tokens,
-                "output_tokens": completion_tokens,
+            "usage": {"input_tokens": pt, "output_tokens": ct},
+        }
+
+    async def _invoke_nova(self, model_id, body, app, client_ip):
+        """Amazon Nova — uses messages with content blocks + inferenceConfig (like Converse)."""
+        messages = body.get("messages")
+        if not messages:
+            return _bedrock_error(400, "messages: field required")
+
+        inf_config = body.get("inferenceConfig", {})
+        max_tokens = inf_config.get("maxTokens", self.backend.config.max_tokens)
+        temperature = inf_config.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke nova | %s | model=%s messages=%d", client_ip, model_id, len(messages))
+
+        backend_messages = []
+        system = body.get("system")
+        if system:
+            sys_text = "\n".join(b.get("text", "") for b in system if isinstance(b, dict))
+            if sys_text:
+                backend_messages.append({"role": "system", "content": sys_text})
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", [])
+            text = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and "text" in b)
+            backend_messages.append({"role": role, "content": text})
+
+        text, pt, ct = await self._run_invoke("nova", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": text}],
+                }
+            },
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": pt, "outputTokens": ct, "totalTokens": pt + ct},
+        }
+
+    async def _invoke_meta(self, model_id, body, app, client_ip):
+        """Meta Llama — prompt/generation format."""
+        prompt = body.get("prompt", "")
+        max_tokens = body.get("max_gen_len", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke meta | %s | model=%s", client_ip, model_id)
+
+        backend_messages = [{"role": "user", "content": prompt}]
+        text, pt, ct = await self._run_invoke("meta", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "generation": text,
+            "prompt_token_count": pt,
+            "generation_token_count": ct,
+            "stop_reason": "stop",
+        }
+
+    async def _invoke_cohere(self, model_id, body, app, client_ip):
+        """Cohere Command — message/chat_history format."""
+        message = body.get("message", "")
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke cohere | %s | model=%s", client_ip, model_id)
+
+        backend_messages = []
+        preamble = body.get("preamble")
+        if preamble:
+            backend_messages.append({"role": "system", "content": preamble})
+
+        for turn in body.get("chat_history", []):
+            role = "assistant" if turn.get("role") == "CHATBOT" else "user"
+            backend_messages.append({"role": role, "content": turn.get("message", "")})
+
+        backend_messages.append({"role": "user", "content": message})
+
+        text, pt, ct = await self._run_invoke("cohere", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "response_id": uuid.uuid4().hex[:24],
+            "text": text,
+            "generation_id": uuid.uuid4().hex[:24],
+            "finish_reason": "COMPLETE",
+            "meta": {
+                "api_version": {"version": "1"},
+                "billed_units": {"input_tokens": pt, "output_tokens": ct},
             },
         }
 
-    async def _invoke_generic(self, model_id: str, body: dict, app: FastAPI, client_ip: str):
-        """Handle InvokeModel for generic models (Amazon Titan style)."""
+    async def _invoke_mistral(self, model_id, body, app, client_ip):
+        """Mistral — prompt/outputs format."""
+        prompt = body.get("prompt", "")
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke mistral | %s | model=%s", client_ip, model_id)
+
+        backend_messages = [{"role": "user", "content": prompt}]
+        text, pt, ct = await self._run_invoke("mistral", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "outputs": [{"text": text, "stop_reason": "stop"}],
+        }
+
+    async def _invoke_deepseek(self, model_id, body, app, client_ip):
+        """DeepSeek — prompt/choices format."""
+        prompt = body.get("prompt", "")
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke deepseek | %s | model=%s", client_ip, model_id)
+
+        backend_messages = [{"role": "user", "content": prompt}]
+        text, pt, ct = await self._run_invoke("deepseek", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "choices": [{"text": text, "stop_reason": "stop"}],
+        }
+
+    async def _invoke_ai21(self, model_id, body, app, client_ip):
+        """AI21 Jamba — OpenAI-like messages/choices format."""
+        messages = body.get("messages")
+        if not messages:
+            return _bedrock_error(400, "messages: field required")
+
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        logger.info("bedrock invoke ai21 | %s | model=%s messages=%d", client_ip, model_id, len(messages))
+
+        backend_messages = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages]
+        text, pt, ct = await self._run_invoke("ai21", model_id, backend_messages, max_tokens, temperature, app, client_ip)
+
+        return {
+            "id": int(time.time()),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct},
+        }
+
+    async def _invoke_titan(self, model_id, body, app, client_ip):
+        """Amazon Titan — inputText/outputText format (also the fallback)."""
         input_text = body.get("inputText", "")
         gen_config = body.get("textGenerationConfig", {})
         max_tokens = gen_config.get("maxTokenCount", self.backend.config.max_tokens)
         temperature = gen_config.get("temperature", self.backend.config.temperature)
-
-        logger.info("bedrock invoke generic | %s | model=%s max_tokens=%s", client_ip, model_id, max_tokens)
-
-        metrics = app.state.metrics
-        start_time = time.time()
+        logger.info("bedrock invoke titan | %s | model=%s", client_ip, model_id)
 
         backend_messages = [{"role": "user", "content": input_text}]
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-            backend_messages, max_tokens, temperature
-        )
+        text, pt, ct = await self._run_invoke("titan", model_id, backend_messages, max_tokens, temperature, app, client_ip)
 
-        elapsed = time.time() - start_time
-        metrics.record(elapsed, prompt_tokens, completion_tokens)
-        logger.info("bedrock invoke generic | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
-
-        # Amazon Titan-style response
         return {
-            "inputTextTokenCount": prompt_tokens,
+            "inputTextTokenCount": pt,
             "results": [
-                {
-                    "tokenCount": completion_tokens,
-                    "outputText": generated_text,
-                    "completionReason": "FINISH",
-                }
+                {"tokenCount": ct, "outputText": text, "completionReason": "FINISH"}
             ],
         }
 
