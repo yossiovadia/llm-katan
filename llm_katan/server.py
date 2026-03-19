@@ -23,7 +23,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.5.2"
+    __version__ = "0.6.0"
 
 logger = logging.getLogger(__name__)
 

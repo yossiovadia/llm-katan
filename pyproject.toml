@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-katan"
-version = "0.5.2"
+version = "0.6.0"
 description = "One tiny model, every LLM API. Drop-in test server for OpenAI, Anthropic, Bedrock, and Vertex."
 readme = "README.md"
 authors = [
@@ -47,7 +47,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.24.0",
-    "ruff>=0.5.2",
+    "ruff>=0.6.0",
 ]
 
 [project.urls]

@@ -209,7 +209,12 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 
 Unknown model IDs fall back to Amazon Titan format.
 
-Enable all providers at once: `--providers openai,anthropic,vertexai,bedrock`
+**Azure OpenAI** (`--providers azure_openai`):
+- `POST /openai/deployments/{deployment-id}/chat/completions` - Chat completions (same format as OpenAI, different URL + `api-key` header auth)
+- Supports `?api-version=2024-10-21` query parameter
+- Response includes Azure-specific `content_filter_results` and `prompt_filter_results`
+
+Enable all providers at once: `--providers openai,anthropic,vertexai,bedrock,azure_openai`
 
 ### Example API Usage
 
@@ -285,6 +290,14 @@ curl -X POST http://127.0.0.1:8000/model/anthropic.claude-v2/invoke \
     "anthropic_version": "bedrock-2023-05-31",
     "max_tokens": 100,
     "messages": [{"role": "user", "content": "Hello"}]
+  }'
+
+# Azure OpenAI
+curl -X POST http://127.0.0.1:8000/openai/deployments/gpt-4/chat/completions?api-version=2024-10-21 \
+  -H "Content-Type: application/json" \
+  -H "api-key: test-key" \
+  -d '{
+    "messages": [{"role": "user", "content": "What is the capital of France?"}]
   }'
 ```
 
@@ -384,7 +397,7 @@ Optional:
 
 ```bash
 # Serve all provider endpoints (auth always required per provider)
-llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock,azure_openai
 
 # Custom generation settings
 llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9

@@ -29,6 +29,7 @@ def available_providers() -> list[str]:
 
 # Auto-register built-in providers on import
 from . import anthropic as _anthropic  # noqa: F401, E402
+from . import azure_openai as _azure_openai  # noqa: F401, E402
 from . import bedrock as _bedrock  # noqa: F401, E402
 from . import openai as _openai  # noqa: F401, E402
 from . import vertexai as _vertexai  # noqa: F401, E402
