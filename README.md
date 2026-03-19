@@ -175,9 +175,12 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 
 ## API Endpoints
 
-**Shared:**
-- `GET /health` - Health check (shows active providers)
+**Shared (no auth required):**
+- `GET /` - Server info (version, model, backend, providers)
+- `GET /health` - Health check
 - `GET /metrics` - Prometheus metrics
+- `GET /docs` - Swagger UI (interactive API docs)
+- `GET /redoc` - ReDoc (alternative API docs)
 
 **OpenAI** (`--providers openai`):
 - `GET /v1/models` - List available models
