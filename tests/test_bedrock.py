@@ -407,7 +407,7 @@ class TestInvokeGeneric:
 
 class TestInvokeMeta:
     @pytest.mark.asyncio
-    async def test_invoke_llama(self, client):
+    async def test_invoke_llama_response_fields(self, client):
         resp = await client.post(
             "/model/meta.llama3-70b-instruct-v1/invoke",
             json={"prompt": "hello from llama", "max_gen_len": 100},
@@ -418,8 +418,38 @@ class TestInvokeMeta:
         assert "generation" in data
         assert "hello from llama" in data["generation"]
         assert data["stop_reason"] == "stop"
-        assert "prompt_token_count" in data
-        assert "generation_token_count" in data
+        assert isinstance(data["prompt_token_count"], int)
+        assert isinstance(data["generation_token_count"], int)
+        assert data["prompt_token_count"] > 0
+        assert data["generation_token_count"] > 0
+
+    @pytest.mark.asyncio
+    async def test_invoke_llama_with_params(self, client):
+        resp = await client.post(
+            "/model/meta.llama3-8b-instruct-v1/invoke",
+            json={"prompt": "test", "max_gen_len": 50, "temperature": 0.3, "top_p": 0.8},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invoke_llama_empty_prompt(self, client):
+        resp = await client.post(
+            "/model/meta.llama3-70b/invoke",
+            json={"prompt": ""},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "generation" in resp.json()
+
+    @pytest.mark.asyncio
+    async def test_invoke_llama_no_auth(self, client):
+        resp = await client.post(
+            "/model/meta.llama3-70b/invoke",
+            json={"prompt": "hi"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
 
 
 # ============================================================
@@ -428,7 +458,7 @@ class TestInvokeMeta:
 
 class TestInvokeCohere:
     @pytest.mark.asyncio
-    async def test_invoke_cohere(self, client):
+    async def test_invoke_cohere_response_fields(self, client):
         resp = await client.post(
             "/model/cohere.command-r-v1/invoke",
             json={"message": "hello from cohere", "max_tokens": 100},
@@ -436,9 +466,12 @@ class TestInvokeCohere:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "text" in data
+        assert isinstance(data["text"], str)
         assert "hello from cohere" in data["text"]
         assert data["finish_reason"] == "COMPLETE"
+        assert isinstance(data["response_id"], str)
+        assert isinstance(data["generation_id"], str)
+        assert data["meta"]["api_version"]["version"] == "1"
         assert data["meta"]["billed_units"]["input_tokens"] > 0
         assert data["meta"]["billed_units"]["output_tokens"] > 0
 
@@ -467,6 +500,15 @@ class TestInvokeCohere:
         )
         assert resp.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_invoke_cohere_no_auth(self, client):
+        resp = await client.post(
+            "/model/cohere.command-r-v1/invoke",
+            json={"message": "hi"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+
 
 # ============================================================
 # InvokeModel — Mistral format
@@ -474,7 +516,7 @@ class TestInvokeCohere:
 
 class TestInvokeMistral:
     @pytest.mark.asyncio
-    async def test_invoke_mistral(self, client):
+    async def test_invoke_mistral_response_fields(self, client):
         resp = await client.post(
             "/model/mistral.mistral-7b-instruct-v0/invoke",
             json={"prompt": "<s>[INST] hello from mistral [/INST]", "max_tokens": 100},
@@ -484,9 +526,39 @@ class TestInvokeMistral:
         data = resp.json()
         assert "outputs" in data
         assert isinstance(data["outputs"], list)
-        assert "text" in data["outputs"][0]
+        assert len(data["outputs"]) == 1
+        assert isinstance(data["outputs"][0]["text"], str)
         assert "hello from mistral" in data["outputs"][0]["text"]
         assert data["outputs"][0]["stop_reason"] == "stop"
+
+    @pytest.mark.asyncio
+    async def test_invoke_mistral_with_params(self, client):
+        resp = await client.post(
+            "/model/mistral.mixtral-8x7b-instruct-v0/invoke",
+            json={"prompt": "test", "max_tokens": 50, "temperature": 0.5, "top_p": 0.9, "top_k": 50},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invoke_mistral_large(self, client):
+        """mistral.mistral-large should also be detected."""
+        resp = await client.post(
+            "/model/mistral.mistral-large-2402-v1/invoke",
+            json={"prompt": "hi"},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "outputs" in resp.json()
+
+    @pytest.mark.asyncio
+    async def test_invoke_mistral_no_auth(self, client):
+        resp = await client.post(
+            "/model/mistral.mistral-7b/invoke",
+            json={"prompt": "hi"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
 
 
 # ============================================================
@@ -495,7 +567,7 @@ class TestInvokeMistral:
 
 class TestInvokeDeepSeek:
     @pytest.mark.asyncio
-    async def test_invoke_deepseek(self, client):
+    async def test_invoke_deepseek_response_fields(self, client):
         resp = await client.post(
             "/model/deepseek.r1-v1/invoke",
             json={"prompt": "hello from deepseek", "max_tokens": 100},
@@ -505,9 +577,28 @@ class TestInvokeDeepSeek:
         data = resp.json()
         assert "choices" in data
         assert isinstance(data["choices"], list)
-        assert "text" in data["choices"][0]
+        assert len(data["choices"]) == 1
+        assert isinstance(data["choices"][0]["text"], str)
         assert "hello from deepseek" in data["choices"][0]["text"]
         assert data["choices"][0]["stop_reason"] == "stop"
+
+    @pytest.mark.asyncio
+    async def test_invoke_deepseek_with_params(self, client):
+        resp = await client.post(
+            "/model/deepseek.r1-v1/invoke",
+            json={"prompt": "test", "max_tokens": 50, "temperature": 0.5, "top_p": 0.9},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invoke_deepseek_no_auth(self, client):
+        resp = await client.post(
+            "/model/deepseek.r1-v1/invoke",
+            json={"prompt": "hi"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
 
 
 # ============================================================
@@ -516,7 +607,7 @@ class TestInvokeDeepSeek:
 
 class TestInvokeAI21:
     @pytest.mark.asyncio
-    async def test_invoke_jamba(self, client):
+    async def test_invoke_jamba_response_fields(self, client):
         resp = await client.post(
             "/model/ai21.jamba-instruct-v1/invoke",
             json={
@@ -528,11 +619,50 @@ class TestInvokeAI21:
         assert resp.status_code == 200
         data = resp.json()
         assert "choices" in data
+        assert isinstance(data["choices"], list)
+        assert data["choices"][0]["index"] == 0
         assert data["choices"][0]["message"]["role"] == "assistant"
+        assert isinstance(data["choices"][0]["message"]["content"], str)
         assert "hello from ai21" in data["choices"][0]["message"]["content"]
         assert data["choices"][0]["finish_reason"] == "stop"
         assert data["usage"]["prompt_tokens"] > 0
+        assert data["usage"]["completion_tokens"] > 0
         assert data["usage"]["total_tokens"] == data["usage"]["prompt_tokens"] + data["usage"]["completion_tokens"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_jamba_multi_turn(self, client):
+        resp = await client.post(
+            "/model/ai21.jamba-instruct-v1/invoke",
+            json={
+                "messages": [
+                    {"role": "system", "content": "Be helpful"},
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "hi"},
+                    {"role": "user", "content": "how are you"},
+                ],
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "how are you" in resp.json()["choices"][0]["message"]["content"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_jamba_missing_messages(self, client):
+        resp = await client.post(
+            "/model/ai21.jamba-instruct-v1/invoke",
+            json={"max_tokens": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_invoke_jamba_no_auth(self, client):
+        resp = await client.post(
+            "/model/ai21.jamba-instruct-v1/invoke",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
 
 
 # ============================================================
@@ -541,7 +671,7 @@ class TestInvokeAI21:
 
 class TestInvokeNova:
     @pytest.mark.asyncio
-    async def test_invoke_nova(self, client):
+    async def test_invoke_nova_response_fields(self, client):
         resp = await client.post(
             "/model/amazon.nova-pro-v1/invoke",
             json={
@@ -552,9 +682,13 @@ class TestInvokeNova:
         assert resp.status_code == 200
         data = resp.json()
         assert data["output"]["message"]["role"] == "assistant"
+        assert isinstance(data["output"]["message"]["content"], list)
+        assert "text" in data["output"]["message"]["content"][0]
         assert "hello from nova" in data["output"]["message"]["content"][0]["text"]
         assert data["stopReason"] == "end_turn"
         assert data["usage"]["inputTokens"] > 0
+        assert data["usage"]["outputTokens"] > 0
+        assert data["usage"]["totalTokens"] == data["usage"]["inputTokens"] + data["usage"]["outputTokens"]
 
     @pytest.mark.asyncio
     async def test_invoke_nova_with_system(self, client):
@@ -580,6 +714,40 @@ class TestInvokeNova:
         )
         assert resp.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_invoke_nova_multi_turn(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-pro-v1/invoke",
+            json={
+                "messages": [
+                    {"role": "user", "content": [{"text": "hello"}]},
+                    {"role": "assistant", "content": [{"text": "hi there"}]},
+                    {"role": "user", "content": [{"text": "how are you"}]},
+                ],
+            },
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 200
+        assert "how are you" in resp.json()["output"]["message"]["content"][0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_nova_missing_messages(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-pro-v1/invoke",
+            json={"inferenceConfig": {"maxTokens": 50}},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_invoke_nova_no_auth(self, client):
+        resp = await client.post(
+            "/model/amazon.nova-pro-v1/invoke",
+            json={"messages": [{"role": "user", "content": [{"text": "hi"}]}]},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+
 
 # ============================================================
 # InvokeModel — Unknown model falls back to Titan
@@ -594,12 +762,15 @@ class TestInvokeFallback:
             headers=bedrock_headers(),
         )
         assert resp.status_code == 200
-        assert "results" in resp.json()
-        assert "outputText" in resp.json()["results"][0]
+        data = resp.json()
+        assert "results" in data
+        assert "outputText" in data["results"][0]
+        assert data["results"][0]["completionReason"] == "FINISH"
+        assert "inputTextTokenCount" in data
 
 
 # ============================================================
-# Auth
+# Auth — all endpoint types
 # ============================================================
 
 class TestAuth:
@@ -612,6 +783,16 @@ class TestAuth:
         )
         assert resp.status_code == 401
         assert "Authorization" in resp.json()["message"]
+        assert resp.json()["__type"] == "UnrecognizedClientException"
+
+    @pytest.mark.asyncio
+    async def test_missing_auth_converse_stream(self, client):
+        resp = await client.post(
+            "/model/test/converse-stream",
+            json=converse_request(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_missing_auth_invoke(self, client):
@@ -631,6 +812,15 @@ class TestAuth:
         )
         assert resp.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_any_auth_value_accepted(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={"Content-Type": "application/json", "Authorization": "literally-anything"},
+        )
+        assert resp.status_code == 200
+
 
 # ============================================================
 # Error Format
@@ -638,7 +828,7 @@ class TestAuth:
 
 class TestErrorFormat:
     @pytest.mark.asyncio
-    async def test_error_structure(self, client):
+    async def test_error_has_message_and_type(self, client):
         resp = await client.post(
             "/model/test/converse",
             json={},
@@ -647,6 +837,8 @@ class TestErrorFormat:
         data = resp.json()
         assert "message" in data
         assert "__type" in data
+        assert isinstance(data["message"], str)
+        assert isinstance(data["__type"], str)
 
     @pytest.mark.asyncio
     async def test_400_validation_exception(self, client):
@@ -666,4 +858,31 @@ class TestErrorFormat:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
-        assert "Exception" in resp.json()["__type"]
+        assert resp.json()["__type"] == "UnrecognizedClientException"
+
+    @pytest.mark.asyncio
+    async def test_invoke_invalid_json(self, client):
+        resp = await client.post(
+            "/model/test/invoke",
+            content=b"not json",
+            headers={**bedrock_headers(), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_converse_invalid_json(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            content=b"not json",
+            headers={**bedrock_headers(), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_invoke_anthropic_missing_messages(self, client):
+        resp = await client.post(
+            "/model/anthropic.claude-v2/invoke",
+            json={"anthropic_version": "bedrock-2023-05-31", "max_tokens": 100},
+            headers=bedrock_headers(),
+        )
+        assert resp.status_code == 400
