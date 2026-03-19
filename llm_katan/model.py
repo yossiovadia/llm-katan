@@ -87,6 +87,7 @@ class ModelBackend(ABC):
         parts.append("Assistant:")
         return "\n".join(parts)
 
+
 class TransformersBackend(ModelBackend):
     """HuggingFace Transformers backend."""
 

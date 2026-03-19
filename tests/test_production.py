@@ -327,7 +327,8 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_missing_messages_field(self, client):
         resp = await client.post("/v1/chat/completions", json={"model": "gpt-test"})
-        assert resp.status_code == 422
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
 
     @pytest.mark.asyncio
     async def test_empty_messages(self, client):
@@ -343,18 +344,19 @@ class TestErrorHandling:
         resp = await client.post(
             "/v1/chat/completions",
             content=b"not json",
-            headers={"content-type": "application/json"},
+            headers={"content-type": "application/json", "Authorization": "Bearer test"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
 
     @pytest.mark.asyncio
     async def test_wrong_content_type(self, client):
         resp = await client.post(
             "/v1/chat/completions",
             content=b"model=test",
-            headers={"content-type": "application/x-www-form-urlencoded"},
+            headers={"content-type": "application/x-www-form-urlencoded", "Authorization": "Bearer test"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_nonexistent_endpoint(self, client):

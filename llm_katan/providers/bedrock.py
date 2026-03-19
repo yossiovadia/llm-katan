@@ -8,12 +8,13 @@ Endpoints:
   POST /model/{modelId}/converse
   POST /model/{modelId}/converse-stream
 
-Also supports the InvokeModel endpoint for Anthropic Claude models:
+Also supports the InvokeModel endpoint with all model families:
   POST /model/{modelId}/invoke
 
 The Converse API is the unified Bedrock format (model-agnostic).
-InvokeModel with Anthropic models uses the Anthropic Messages format
-inside the Bedrock envelope (with anthropic_version: "bedrock-2023-05-31").
+InvokeModel routes to model-family-specific handlers based on the model ID:
+Anthropic Claude, Amazon Nova, Amazon Titan, Meta Llama, Cohere,
+Mistral, DeepSeek, AI21 Jamba.
 
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
@@ -206,10 +207,6 @@ class BedrockProvider(Provider):
         logger.info("bedrock converse | %s | 200 | stream | %d tokens | %.3fs", client_ip, input_tokens + output_tokens, elapsed)
 
     # ----------------------------------------------------------------
-    # InvokeModel handler (Anthropic Claude format inside Bedrock)
-    # ----------------------------------------------------------------
-
-    # ----------------------------------------------------------------
     # InvokeModel dispatcher — routes to model-family-specific handler
     # ----------------------------------------------------------------
 
@@ -217,7 +214,7 @@ class BedrockProvider(Provider):
     _MODEL_FAMILIES = [
         (("anthropic.", "claude"), "_invoke_anthropic"),
         (("amazon.nova",), "_invoke_nova"),
-        (("meta.llama", "meta.llama"), "_invoke_meta"),
+        (("meta.llama",), "_invoke_meta"),
         (("cohere.",), "_invoke_cohere"),
         (("mistral.",), "_invoke_mistral"),
         (("deepseek.",), "_invoke_deepseek"),

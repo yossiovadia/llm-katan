@@ -138,4 +138,5 @@ async def test_missing_auth_rejected(client):
 @pytest.mark.asyncio
 async def test_missing_messages(client):
     resp = await client.post("/v1/chat/completions", json={"model": "gpt-test"}, headers=openai_headers())
-    assert resp.status_code == 422
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "invalid_request_error"

@@ -12,8 +12,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from llm_katan.model import ModelBackend
-
 from . import register_provider
 from .base import Provider
 
@@ -39,7 +37,7 @@ class OpenAIProvider(Provider):
 
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/v1/chat/completions")
-        async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+        async def chat_completions(raw_request: Request):
             client_ip = raw_request.client.host if raw_request.client else "unknown"
 
             # Auth check
@@ -57,6 +55,25 @@ class OpenAIProvider(Provider):
                             "code": "invalid_api_key",
                         }
                     },
+                )
+
+            # Parse and validate request
+            try:
+                body = await raw_request.json()
+            except Exception:
+                logger.warning("openai | %s | 400 | invalid JSON", client_ip)
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": {"message": "Invalid JSON in request body", "type": "invalid_request_error", "code": None}},
+                )
+
+            try:
+                request = ChatCompletionRequest(**body)
+            except Exception as e:
+                logger.warning("openai | %s | 400 | %s", client_ip, e)
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": {"message": str(e), "type": "invalid_request_error", "code": None}},
                 )
 
             logger.info(

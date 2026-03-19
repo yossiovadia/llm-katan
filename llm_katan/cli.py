@@ -103,7 +103,14 @@ def main(
     """
     logging.getLogger().setLevel(getattr(logging, log_level.upper()))
 
+    from .providers import available_providers
+
     provider_list = [p.strip() for p in providers.split(",")]
+    available = available_providers()
+    for p in provider_list:
+        if p not in available:
+            click.echo(f"Error: Unknown provider {p!r}. Available: {', '.join(available)}", err=True)
+            sys.exit(1)
 
     config = ServerConfig(
         model_name=model,

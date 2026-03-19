@@ -18,7 +18,6 @@ Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 import json
 import logging
 import time
-import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -144,7 +143,6 @@ class VertexAIProvider(Provider):
         )
 
         model_name = self.backend.config.served_model_name
-        response_id = f"resp-{uuid.uuid4().hex[:16]}"
 
         if stream:
             return StreamingResponse(
