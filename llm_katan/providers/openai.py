@@ -40,9 +40,14 @@ class OpenAIProvider(Provider):
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/v1/chat/completions")
         async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+            client_ip = raw_request.client.host if raw_request.client else "unknown"
+
             # Auth check
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
+                logger.warning(
+                    "openai | %s | 401 | %s", client_ip, auth_err,
+                )
                 return JSONResponse(
                     status_code=401,
                     content={
@@ -53,6 +58,12 @@ class OpenAIProvider(Provider):
                         }
                     },
                 )
+
+            logger.info(
+                "openai | %s | model=%s messages=%d stream=%s max_tokens=%s temp=%s",
+                client_ip, request.model, len(request.messages),
+                request.stream, request.max_tokens, request.temperature,
+            )
 
             metrics = app.state.metrics
             start_time = time.time()
@@ -78,7 +89,12 @@ class OpenAIProvider(Provider):
 
                     yield f"data: {json.dumps(self._final_chunk(response_id, created, model_name, prompt_tokens, completion_tokens))}\n\n"
                     yield "data: [DONE]\n\n"
-                    metrics.record(time.time() - start_time, prompt_tokens, completion_tokens)
+                    elapsed = time.time() - start_time
+                    metrics.record(elapsed, prompt_tokens, completion_tokens)
+                    logger.info(
+                        "openai | %s | 200 | stream | %d tokens | %.3fs",
+                        client_ip, prompt_tokens + completion_tokens, elapsed,
+                    )
 
                 return StreamingResponse(
                     stream_response(),
@@ -89,7 +105,10 @@ class OpenAIProvider(Provider):
             elapsed = time.time() - start_time
             metrics.record(elapsed, prompt_tokens, completion_tokens)
 
-            logger.info("Response: %s | %d tokens | %.2fs", model_name, prompt_tokens + completion_tokens, elapsed)
+            logger.info(
+                "openai | %s | 200 | %d tokens | %.3fs",
+                client_ip, prompt_tokens + completion_tokens, elapsed,
+            )
 
             return self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens)
 

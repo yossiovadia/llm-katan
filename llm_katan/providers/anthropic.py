@@ -98,33 +98,47 @@ class AnthropicProvider(Provider):
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/v1/messages")
         async def messages(raw_request: Request):
+            client_ip = raw_request.client.host if raw_request.client else "unknown"
+
             # Auth check
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
+                logger.warning("anthropic | %s | 401 | %s", client_ip, auth_err)
                 return _anthropic_error(401, auth_err)
 
             # Check anthropic-version header
             if not raw_request.headers.get("anthropic-version"):
-                logger.warning("Request missing anthropic-version header")
+                logger.warning("anthropic | %s | missing anthropic-version header", client_ip)
 
             # Parse request body
             try:
                 body = await raw_request.json()
             except Exception:
+                logger.warning("anthropic | %s | 400 | invalid JSON", client_ip)
                 return _anthropic_error(400, "invalid JSON in request body")
 
             # Validate required fields
             if "model" not in body:
+                logger.warning("anthropic | %s | 400 | missing model", client_ip)
                 return _anthropic_error(400, "model: field required")
             if "max_tokens" not in body:
+                logger.warning("anthropic | %s | 400 | missing max_tokens", client_ip)
                 return _anthropic_error(400, "max_tokens: field required")
             if "messages" not in body or not isinstance(body.get("messages"), list):
+                logger.warning("anthropic | %s | 400 | missing messages", client_ip)
                 return _anthropic_error(400, "messages: field required")
 
             try:
                 request = AnthropicMessagesRequest(**body)
             except Exception as e:
+                logger.warning("anthropic | %s | 400 | %s", client_ip, e)
                 return _anthropic_error(400, str(e))
+
+            logger.info(
+                "anthropic | %s | model=%s messages=%d stream=%s max_tokens=%s temp=%s",
+                client_ip, request.model, len(request.messages),
+                request.stream, request.max_tokens, request.temperature,
+            )
 
             metrics = app.state.metrics
             start_time = time.time()
@@ -156,7 +170,7 @@ class AnthropicProvider(Provider):
                     self._stream_response(
                         msg_id, model_name, generated_text,
                         prompt_tokens, completion_tokens,
-                        metrics, start_time,
+                        metrics, start_time, client_ip,
                     ),
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -166,10 +180,8 @@ class AnthropicProvider(Provider):
             metrics.record(elapsed, prompt_tokens, completion_tokens)
 
             logger.info(
-                "Response: %s | %d tokens | %.2fs",
-                model_name,
-                prompt_tokens + completion_tokens,
-                elapsed,
+                "anthropic | %s | 200 | %d tokens | %.3fs",
+                client_ip, prompt_tokens + completion_tokens, elapsed,
             )
 
             return self._full_response(
@@ -194,7 +206,7 @@ class AnthropicProvider(Provider):
         }
 
     @staticmethod
-    async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time):
+    async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown"):
         # message_start
         yield (
             f"event: message_start\n"
@@ -234,7 +246,12 @@ class AnthropicProvider(Provider):
             f"data: {json.dumps({'type': 'message_stop'})}\n\n"
         )
 
-        metrics.record(time.time() - start_time, input_tokens, output_tokens)
+        elapsed = time.time() - start_time
+        metrics.record(elapsed, input_tokens, output_tokens)
+        logger.info(
+            "anthropic | %s | 200 | stream | %d tokens | %.3fs",
+            client_ip, input_tokens + output_tokens, elapsed,
+        )
 
 
 register_provider("anthropic", AnthropicProvider)
