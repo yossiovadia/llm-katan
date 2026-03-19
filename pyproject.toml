@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-katan"
+version = "0.2.0"
+description = "One tiny model, every LLM API. Drop-in test server for OpenAI, Anthropic, Bedrock, and Vertex."
+readme = "README.md"
+authors = [
+    {name = "Yossi Ovadia", email = "yovadia@redhat.com"}
+]
+maintainers = [
+    {name = "Yossi Ovadia", email = "yovadia@redhat.com"}
+]
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+keywords = ["llm", "testing", "fastapi", "huggingface", "vllm", "ai", "ml", "mock", "openai", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "transformers>=4.35.0",
+    "torch>=2.0.0",
+    "click>=8.0.0",
+    "pydantic>=2.0.0",
+    "numpy>=1.21.0",
+]
+
+[project.optional-dependencies]
+vllm = [
+    "vllm>=0.2.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.24.0",
+    "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yossiovadia/llm-katan"
+Documentation = "https://github.com/yossiovadia/llm-katan"
+Repository = "https://github.com/yossiovadia/llm-katan.git"
+Issues = "https://github.com/yossiovadia/llm-katan/issues"
+
+[project.scripts]
+llm-katan = "llm_katan.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
