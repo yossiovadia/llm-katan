@@ -26,22 +26,25 @@ class MockBackend(ModelBackend):
         return generated, 10, len(generated.split())
 
 
-def create_test_app(require_auth=False):
+def create_test_app():
     config = ServerConfig(
         model_name="test-model",
         served_model_name="gpt-test",
         port=8000,
         providers=["openai"],
-        require_auth=require_auth,
     )
     app = create_app(config)
     backend = MockBackend(config)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
 
-    provider = OpenAIProvider(backend=backend, require_auth=require_auth)
+    provider = OpenAIProvider(backend=backend)
     provider.register_routes(app)
     return app
+
+
+def openai_headers():
+    return {"Content-Type": "application/json", "Authorization": "Bearer sk-test"}
 
 
 @pytest.fixture
@@ -89,6 +92,7 @@ async def test_chat_completion(client):
     resp = await client.post(
         "/v1/chat/completions",
         json={"model": "gpt-test", "messages": [{"role": "user", "content": "hello"}]},
+        headers=openai_headers(),
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -101,6 +105,7 @@ async def test_chat_completion_streaming(client):
     resp = await client.post(
         "/v1/chat/completions",
         json={"model": "gpt-test", "messages": [{"role": "user", "content": "hello"}], "stream": True},
+        headers=openai_headers(),
     )
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers["content-type"]
@@ -114,6 +119,7 @@ async def test_metrics(client):
     await client.post(
         "/v1/chat/completions",
         json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+        headers=openai_headers(),
     )
     resp = await client.get("/metrics")
     assert resp.status_code == 200
@@ -121,6 +127,15 @@ async def test_metrics(client):
 
 
 @pytest.mark.asyncio
+async def test_missing_auth_rejected(client):
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_missing_messages(client):
-    resp = await client.post("/v1/chat/completions", json={"model": "gpt-test"})
+    resp = await client.post("/v1/chat/completions", json={"model": "gpt-test"}, headers=openai_headers())
     assert resp.status_code == 422

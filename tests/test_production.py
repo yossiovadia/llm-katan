@@ -45,30 +45,33 @@ class MockBackend(ModelBackend):
         }
 
 
-def make_app(max_concurrent=1, latency=0, require_auth=False):
+def make_app(max_concurrent=1, latency=0):
     config = ServerConfig(
         model_name="test-model",
         served_model_name="gpt-test",
         port=8000,
         max_concurrent=max_concurrent,
         providers=["openai"],
-        require_auth=require_auth,
     )
     app = create_app(config)
     backend = MockBackend(config, latency=latency)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
 
-    provider = OpenAIProvider(backend=backend, require_auth=require_auth)
+    provider = OpenAIProvider(backend=backend)
     provider.register_routes(app)
     return app
+
+
+def openai_headers():
+    return {"Content-Type": "application/json", "Authorization": "Bearer sk-test"}
 
 
 @pytest_asyncio.fixture
 async def client():
     app = make_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as c:
         yield c
 
 
@@ -151,7 +154,7 @@ class TestStreaming:
         """Non-streaming and streaming should produce identical text."""
         app = make_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as client:
             body = {"model": "gpt-test", "messages": [{"role": "user", "content": "hello world"}]}
 
             # Non-streaming
@@ -231,7 +234,7 @@ class TestConcurrency:
         backend = app.state.backend
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as client:
             body = {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]}
 
             # Fire 3 concurrent requests
@@ -247,7 +250,7 @@ class TestConcurrency:
         app = make_app(max_concurrent=3, latency=0.05)
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as client:
             body = {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]}
 
             import time
@@ -264,6 +267,59 @@ class TestConcurrency:
 # ============================================================
 # 4. Error Handling
 # ============================================================
+
+class TestOpenAIAuth:
+    """Verify OpenAI auth is always required."""
+
+    @pytest.mark.asyncio
+    async def test_missing_authorization_rejected(self):
+        app = make_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as bare_client:
+            resp = await bare_client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+            )
+            assert resp.status_code == 401
+            data = resp.json()
+            assert data["error"]["type"] == "invalid_request_error"
+            assert "Authorization" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_authorization_present_accepted(self, client):
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_any_bearer_value_accepted(self):
+        app = make_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as bare_client:
+            resp = await bare_client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"Authorization": "Bearer literally-anything"},
+            )
+            assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_openai_error_format_on_auth_failure(self):
+        app = make_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as bare_client:
+            resp = await bare_client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]},
+            )
+            data = resp.json()
+            assert "error" in data
+            assert "message" in data["error"]
+            assert "type" in data["error"]
+            assert "code" in data["error"]
+
 
 class TestErrorHandling:
     """Verify proper error responses."""
@@ -318,7 +374,7 @@ class TestMetrics:
         app = make_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as client:
             body = {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}]}
 
             for _ in range(5):
@@ -335,7 +391,7 @@ class TestMetrics:
         app = make_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=openai_headers()) as client:
             body = {"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}], "stream": True}
             await client.post("/v1/chat/completions", json=body)
 

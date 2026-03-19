@@ -31,19 +31,18 @@ class MockBackend(ModelBackend):
         return generated, 10, len(generated)
 
 
-def make_app(require_auth=False):
+def make_app():
     config = ServerConfig(
         model_name="test-model",
         served_model_name="claude-test",
         port=8000,
         providers=["anthropic"],
-        require_auth=require_auth,
     )
     app = create_app(config)
     backend = MockBackend(config)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
-    provider = AnthropicProvider(backend=backend, require_auth=require_auth)
+    provider = AnthropicProvider(backend=backend)
     provider.register_routes(app)
     return app
 
@@ -51,14 +50,6 @@ def make_app(require_auth=False):
 @pytest_asyncio.fixture
 async def client():
     app = make_app()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
-@pytest_asyncio.fixture
-async def auth_client():
-    app = make_app(require_auth=True)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -75,11 +66,14 @@ def base_request(**overrides):
     return req
 
 
-def anthropic_headers():
-    return {
+def anthropic_headers(**extra):
+    h = {
         "Content-Type": "application/json",
         "anthropic-version": "2023-06-01",
+        "x-api-key": "sk-ant-test-key",
     }
+    h.update(extra)
+    return h
 
 
 # ============================================================
@@ -337,8 +331,9 @@ class TestStreaming:
 
 class TestAuth:
     @pytest.mark.asyncio
-    async def test_missing_api_key_when_required(self, auth_client):
-        resp = await auth_client.post("/v1/messages", json=base_request(), headers=anthropic_headers())
+    async def test_missing_api_key_rejected(self, client):
+        headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+        resp = await client.post("/v1/messages", json=base_request(), headers=headers)
         assert resp.status_code == 401
         data = resp.json()
         assert data["type"] == "error"
@@ -346,15 +341,14 @@ class TestAuth:
         assert "x-api-key" in data["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_api_key_present(self, auth_client):
-        headers = {**anthropic_headers(), "x-api-key": "sk-ant-test-key"}
-        resp = await auth_client.post("/v1/messages", json=base_request(), headers=headers)
+    async def test_api_key_present_accepted(self, client):
+        resp = await client.post("/v1/messages", json=base_request(), headers=anthropic_headers())
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_no_auth_required(self, client):
-        # client fixture has require_auth=False, no x-api-key header
-        resp = await client.post("/v1/messages", json=base_request(), headers=anthropic_headers())
+    async def test_any_api_key_value_accepted(self, client):
+        headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01", "x-api-key": "literally-anything"}
+        resp = await client.post("/v1/messages", json=base_request(), headers=headers)
         assert resp.status_code == 200
 
 
@@ -384,7 +378,8 @@ class TestErrorFormat:
         assert resp.json()["error"]["type"] == "invalid_request_error"
 
     @pytest.mark.asyncio
-    async def test_401_uses_authentication_error(self, auth_client):
-        resp = await auth_client.post("/v1/messages", json=base_request(), headers=anthropic_headers())
+    async def test_401_uses_authentication_error(self, client):
+        headers = {"Content-Type": "application/json"}  # no x-api-key
+        resp = await client.post("/v1/messages", json=base_request(), headers=headers)
         assert resp.status_code == 401
         assert resp.json()["error"]["type"] == "authentication_error"

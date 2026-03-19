@@ -23,7 +23,6 @@ class ServerConfig:
     quantize: bool = True
     max_concurrent: int = 1
     providers: list[str] = field(default_factory=lambda: ["openai"])
-    require_auth: bool = False
 
     def __post_init__(self):
         if self.served_model_name is None:

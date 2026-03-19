@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     # Register provider routes
     for provider_name in config.providers:
         provider_cls = get_provider(provider_name)
-        provider = provider_cls(backend=backend, require_auth=config.require_auth)
+        provider = provider_cls(backend=backend)
         provider.register_routes(app)
         logger.info("Registered provider: %s", provider_name)
 

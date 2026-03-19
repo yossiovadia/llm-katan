@@ -13,7 +13,7 @@ designed for testing and development with real tiny models.
 - ⚡ **Tiny Models**: Ultra-lightweight models for fast testing (Qwen3-0.6B, etc.)
 - 🔄 **Multi-Provider**: Serve the same model as OpenAI, Anthropic, and more (Bedrock, Vertex coming soon)
 - 🎯 **API Compatible**: Drop-in replacement for provider endpoints with correct response formats
-- 🔐 **Auth Validation**: Optional `--require-auth` to test API key injection
+- 🔐 **Auth Validation**: Each provider requires its native auth header (e.g., `Authorization` for OpenAI, `x-api-key` for Anthropic)
 - 📦 **PyPI Ready**: Easy installation and distribution
 - 🛠️ **vLLM Support**: Optional vLLM backend for production-like performance
 
@@ -318,7 +318,6 @@ Optional:
   -d, --device [auto|cpu|cuda]  Device to use (default: auto)
   --quantize/--no-quantize      Enable int8 quantization for faster CPU inference (default: enabled)
   --providers TEXT               Comma-separated providers to enable (default: openai)
-  --require-auth                Require auth headers on requests (default: disabled)
   --max-concurrent INTEGER      Max concurrent inference requests (default: 1)
   --log-level [debug|info|warning|error]  Log level (default: INFO)
   --version                     Show version and exit
@@ -328,8 +327,8 @@ Optional:
 #### Advanced Usage Examples
 
 ```bash
-# Serve both OpenAI and Anthropic endpoints with auth validation
-llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic --require-auth
+# Serve both OpenAI and Anthropic endpoints (auth always required per provider)
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic
 
 # Custom generation settings
 llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9

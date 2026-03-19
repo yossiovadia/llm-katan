@@ -74,12 +74,6 @@ logger = logging.getLogger(__name__)
     default="openai",
     help="Comma-separated list of API providers to enable (default: openai)",
 )
-@click.option(
-    "--require-auth",
-    is_flag=True,
-    default=False,
-    help="Require auth headers on requests (default: disabled)",
-)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -94,7 +88,6 @@ def main(
     quantize: bool,
     max_concurrent: int,
     providers: str,
-    require_auth: bool,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -124,7 +117,6 @@ def main(
         quantize=quantize,
         max_concurrent=max_concurrent,
         providers=provider_list,
-        require_auth=require_auth,
     )
 
     click.echo(f"LLM Katan v{__version__}")
@@ -135,7 +127,6 @@ def main(
     if config.device_auto == "cpu":
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
-    click.echo(f"  Auth:      {'required' if config.require_auth else 'disabled'}")
     click.echo(f"  Server:    http://{config.host}:{config.port}")
     click.echo()
 
