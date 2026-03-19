@@ -186,7 +186,12 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 **Anthropic** (`--providers anthropic`):
 - `POST /v1/messages` - Messages API (Anthropic compatible, with SSE streaming)
 
-Enable multiple providers at once: `--providers openai,anthropic`
+**Vertex AI / Gemini** (`--providers vertexai`):
+- `POST /v1beta/models/{model}:generateContent` - Generate content
+- `POST /v1beta/models/{model}:streamGenerateContent` - Streaming generate content
+- Also supports `/v1/` prefix
+
+Enable multiple providers at once: `--providers openai,anthropic,vertexai`
 
 ### Example API Usage
 
@@ -231,6 +236,16 @@ curl -X POST http://127.0.0.1:8000/v1/messages \
     "max_tokens": 50,
     "messages": [
       {"role": "user", "content": "What is the capital of France?"}
+    ]
+  }'
+
+# Vertex AI / Gemini API
+curl -X POST http://127.0.0.1:8000/v1beta/models/gemini-pro:generateContent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-token" \
+  -d '{
+    "contents": [
+      {"role": "user", "parts": [{"text": "What is the capital of France?"}]}
     ]
   }'
 ```
@@ -330,8 +345,8 @@ Optional:
 #### Advanced Usage Examples
 
 ```bash
-# Serve both OpenAI and Anthropic endpoints (auth always required per provider)
-llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic
+# Serve all provider endpoints (auth always required per provider)
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai
 
 # Custom generation settings
 llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9
