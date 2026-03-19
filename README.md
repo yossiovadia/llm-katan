@@ -191,7 +191,12 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 - `POST /v1beta/models/{model}:streamGenerateContent` - Streaming generate content
 - Also supports `/v1/` prefix
 
-Enable multiple providers at once: `--providers openai,anthropic,vertexai`
+**AWS Bedrock** (`--providers bedrock`):
+- `POST /model/{modelId}/converse` - Converse API (unified, model-agnostic)
+- `POST /model/{modelId}/converse-stream` - Streaming Converse API
+- `POST /model/{modelId}/invoke` - InvokeModel (Anthropic Claude format when model ID contains "anthropic" or "claude", Amazon Titan format otherwise)
+
+Enable all providers at once: `--providers openai,anthropic,vertexai,bedrock`
 
 ### Example API Usage
 
@@ -247,6 +252,26 @@ curl -X POST http://127.0.0.1:8000/v1beta/models/gemini-pro:generateContent \
     "contents": [
       {"role": "user", "parts": [{"text": "What is the capital of France?"}]}
     ]
+  }'
+
+# AWS Bedrock Converse API
+curl -X POST http://127.0.0.1:8000/model/anthropic.claude-v2/converse \
+  -H "Content-Type: application/json" \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=test" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": [{"text": "What is the capital of France?"}]}
+    ]
+  }'
+
+# AWS Bedrock InvokeModel (Anthropic Claude)
+curl -X POST http://127.0.0.1:8000/model/anthropic.claude-v2/invoke \
+  -H "Content-Type: application/json" \
+  -H "Authorization: AWS4-HMAC-SHA256 Credential=test" \
+  -d '{
+    "anthropic_version": "bedrock-2023-05-31",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
 
@@ -346,7 +371,7 @@ Optional:
 
 ```bash
 # Serve all provider endpoints (auth always required per provider)
-llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock
 
 # Custom generation settings
 llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9
