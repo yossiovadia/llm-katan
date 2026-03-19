@@ -228,8 +228,54 @@ class VLLMBackend(ModelBackend):
         return generated_text, prompt_tokens, completion_tokens
 
 
+class EchoBackend(ModelBackend):
+    """Echo backend — returns request metadata without loading any model.
+
+    No torch/transformers dependency. Instant startup, ~10MB memory.
+    """
+
+    def __init__(self, config: ServerConfig):
+        super().__init__(config)
+        import socket
+
+        self._hostname = socket.gethostname()
+
+    async def load_model(self) -> None:
+        logger.info("Echo backend ready (no model loaded)")
+
+    async def _generate_text(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple[str, int, int]:
+        from datetime import datetime, timezone
+
+        user_msg = ""
+        for m in reversed(messages):
+            if m["role"] == "user":
+                user_msg = m["content"]
+                break
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            f"[echo] model={self.config.served_model_name} host={self._hostname}:{self.config.port} "
+            f"time={now} messages={len(messages)} max_tokens={max_tokens} temperature={temperature}",
+            f"User: {user_msg}",
+        ]
+        generated = "\n".join(lines)
+
+        # Fake token counts based on word count
+        prompt_tokens = sum(len(m.get("content", "").split()) for m in messages)
+        completion_tokens = len(generated.split())
+
+        return generated, prompt_tokens, completion_tokens
+
+
 def create_backend(config: ServerConfig) -> ModelBackend:
     """Factory function to create the appropriate backend."""
+    if config.backend == "echo":
+        return EchoBackend(config)
     if config.backend == "vllm":
         return VLLMBackend(config)
     if config.backend == "transformers":

@@ -75,6 +75,9 @@ Visit [https://huggingface.co/settings/tokens](https://huggingface.co/settings/t
 ### Basic Usage
 
 ```bash
+# Echo mode — no model download, instant startup, no torch needed
+llm-katan --model my-test-model --backend echo --providers openai,anthropic
+
 # Start server with a tiny model (quantization enabled by default for speed)
 llm-katan --model Qwen/Qwen3-0.6B --port 8000
 
@@ -312,7 +315,7 @@ Optional:
                                 Model name to serve via API (defaults to model name)
   -p, --port INTEGER            Port to serve on (default: 8000)
   -h, --host TEXT               Host to bind to (default: 0.0.0.0)
-  -b, --backend [transformers|vllm]      Backend to use (default: transformers)
+  -b, --backend [transformers|vllm|echo]  Backend to use (default: transformers)
   --max, --max-tokens INTEGER   Maximum tokens to generate (default: 512)
   -t, --temperature FLOAT       Sampling temperature (default: 0.7)
   -d, --device [auto|cpu|cuda]  Device to use (default: auto)

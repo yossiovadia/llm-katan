@@ -34,8 +34,8 @@ class ServerConfig:
         self.backend = os.getenv("LLM_KATAN_BACKEND", self.backend)
         self.host = os.getenv("LLM_KATAN_HOST", self.host)
 
-        if self.backend not in ("transformers", "vllm"):
-            raise ValueError(f"Invalid backend: {self.backend}. Must be 'transformers' or 'vllm'")
+        if self.backend not in ("transformers", "vllm", "echo"):
+            raise ValueError(f"Invalid backend: {self.backend}. Must be 'transformers', 'vllm', or 'echo'")
 
     @property
     def device_auto(self) -> str:

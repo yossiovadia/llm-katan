@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 @click.option("--host", "-h", default="0.0.0.0", help="Host (default: 0.0.0.0)")
 @click.option(
     "--backend", "-b",
-    type=click.Choice(["transformers", "vllm"], case_sensitive=False),
+    type=click.Choice(["transformers", "vllm", "echo"], case_sensitive=False),
     default="transformers",
-    help="Backend (default: transformers)",
+    help="Backend: transformers, vllm, or echo (default: transformers)",
 )
 @click.option("--max-tokens", "--max", default=512, type=int, help="Max tokens (default: 512)")
 @click.option("--temperature", "-t", default=0.7, type=float, help="Temperature (default: 0.7)")
@@ -130,19 +130,20 @@ def main(
     click.echo(f"  Server:    http://{config.host}:{config.port}")
     click.echo()
 
-    if config.backend == "vllm":
-        try:
-            import vllm  # noqa: F401
-        except ImportError:
-            click.echo("Error: vLLM not installed. pip install vllm", err=True)
-            sys.exit(1)
+    if config.backend != "echo":
+        if config.backend == "vllm":
+            try:
+                import vllm  # noqa: F401
+            except ImportError:
+                click.echo("Error: vLLM not installed. pip install vllm", err=True)
+                sys.exit(1)
 
-    try:
-        import torch  # noqa: F401
-        import transformers  # noqa: F401
-    except ImportError:
-        click.echo("Error: Missing deps. pip install transformers torch", err=True)
-        sys.exit(1)
+        try:
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+        except ImportError:
+            click.echo("Error: Missing deps. pip install transformers torch", err=True)
+            sys.exit(1)
 
     try:
         asyncio.run(run_server(config))
