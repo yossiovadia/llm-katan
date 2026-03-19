@@ -194,7 +194,20 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 **AWS Bedrock** (`--providers bedrock`):
 - `POST /model/{modelId}/converse` - Converse API (unified, model-agnostic)
 - `POST /model/{modelId}/converse-stream` - Streaming Converse API
-- `POST /model/{modelId}/invoke` - InvokeModel (Anthropic Claude format when model ID contains "anthropic" or "claude", Amazon Titan format otherwise)
+- `POST /model/{modelId}/invoke` - InvokeModel with all model families:
+
+| Model Family | Model ID Prefix | Request Format |
+|---|---|---|
+| Anthropic Claude | `anthropic.*` | Messages API (`messages`, `max_tokens`, content blocks) |
+| Amazon Nova | `amazon.nova*` | Messages + content blocks + `inferenceConfig` |
+| Amazon Titan | `amazon.titan*` | `inputText` + `textGenerationConfig` |
+| Meta Llama | `meta.llama*` | `prompt` + `max_gen_len` |
+| Cohere Command | `cohere.*` | `message` + `chat_history` |
+| Mistral | `mistral.*` | `prompt` + `max_tokens` |
+| DeepSeek | `deepseek.*` | `prompt` + `max_tokens` |
+| AI21 Jamba | `ai21.*` | `messages` (OpenAI-like) |
+
+Unknown model IDs fall back to Amazon Titan format.
 
 Enable all providers at once: `--providers openai,anthropic,vertexai,bedrock`
 
