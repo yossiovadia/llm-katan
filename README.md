@@ -11,8 +11,9 @@ designed for testing and development with real tiny models.
 - 🚀 **FastAPI-based**: High-performance async web server
 - 🤗 **HuggingFace Integration**: Real model inference with transformers
 - ⚡ **Tiny Models**: Ultra-lightweight models for fast testing (Qwen3-0.6B, etc.)
-- 🔄 **Multi-Instance**: Run same model on different ports with different names
-- 🎯 **OpenAI Compatible**: Drop-in replacement for OpenAI API endpoints
+- 🔄 **Multi-Provider**: Serve the same model as OpenAI, Anthropic, and more (Bedrock, Vertex coming soon)
+- 🎯 **API Compatible**: Drop-in replacement for provider endpoints with correct response formats
+- 🔐 **Auth Validation**: Optional `--require-auth` to test API key injection
 - 📦 **PyPI Ready**: Easy installation and distribution
 - 🛠️ **vLLM Support**: Optional vLLM backend for production-like performance
 
@@ -142,11 +143,47 @@ curl http://localhost:8001/v1/models  # Returns "claude-3-haiku"
 
 **Perfect for testing multi-provider scenarios with one tiny model!**
 
+## How It Works
+
+llm-katan does **not** proxy requests to real providers. There is no OpenAI SDK, no Anthropic SDK, no cloud API calls. Instead, each provider is a thin formatting layer around the same local model:
+
+```
+Request (any provider format)
+       |
+       v
+Provider (openai.py / anthropic.py / ...)
+  - Parses the provider-specific request format
+  - Extracts: messages, max_tokens, temperature
+  - Normalizes to plain Python dicts
+       |
+       v
+Backend (model.py)
+  - Converts messages to a prompt string
+  - Feeds it directly to the local model (e.g., Qwen3-0.6B)
+  - Returns: generated text + token counts
+       |
+       v
+Provider (same one that handled the request)
+  - Wraps the raw text in the provider's native response format
+  - Returns to client
+```
+
+So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format out. The backend has zero knowledge of any provider format — it just generates text. No translation chain, no provider in the middle.
+
 ## API Endpoints
 
-- `GET /health` - Health check
+**Shared:**
+- `GET /health` - Health check (shows active providers)
+- `GET /metrics` - Prometheus metrics
+
+**OpenAI** (`--providers openai`):
 - `GET /v1/models` - List available models
 - `POST /v1/chat/completions` - Chat completions (OpenAI compatible)
+
+**Anthropic** (`--providers anthropic`):
+- `POST /v1/messages` - Messages API (Anthropic compatible, with SSE streaming)
+
+Enable multiple providers at once: `--providers openai,anthropic`
 
 ### Example API Usage
 
@@ -180,6 +217,19 @@ curl http://127.0.0.1:8000/v1/models
 
 # Health check
 curl http://127.0.0.1:8000/health
+
+# Anthropic Messages API
+curl -X POST http://127.0.0.1:8000/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: test-key" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-test",
+    "max_tokens": 50,
+    "messages": [
+      {"role": "user", "content": "What is the capital of France?"}
+    ]
+  }'
 ```
 
 ## CPU Optimization
@@ -267,6 +317,9 @@ Optional:
   -t, --temperature FLOAT       Sampling temperature (default: 0.7)
   -d, --device [auto|cpu|cuda]  Device to use (default: auto)
   --quantize/--no-quantize      Enable int8 quantization for faster CPU inference (default: enabled)
+  --providers TEXT               Comma-separated providers to enable (default: openai)
+  --require-auth                Require auth headers on requests (default: disabled)
+  --max-concurrent INTEGER      Max concurrent inference requests (default: 1)
   --log-level [debug|info|warning|error]  Log level (default: INFO)
   --version                     Show version and exit
   --help                        Show help and exit
@@ -275,6 +328,9 @@ Optional:
 #### Advanced Usage Examples
 
 ```bash
+# Serve both OpenAI and Anthropic endpoints with auth validation
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic --require-auth
+
 # Custom generation settings
 llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9
 
