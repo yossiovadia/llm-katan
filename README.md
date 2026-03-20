@@ -179,6 +179,7 @@ So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format ou
 - `GET /` - Server info (version, model, backend, providers)
 - `GET /health` - Health check
 - `GET /metrics` - Prometheus metrics
+- `GET /dashboard` - Live request/response dashboard (WebSocket-powered)
 - `GET /docs` - Swagger UI (interactive API docs)
 - `GET /redoc` - ReDoc (alternative API docs)
 

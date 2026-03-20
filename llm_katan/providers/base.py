@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 
 from fastapi import FastAPI
 
+from llm_katan.events import broadcaster, make_event
 from llm_katan.model import ModelBackend
 
 
@@ -32,3 +33,28 @@ class Provider(ABC):
             if key.lower() == self.auth_header.lower():
                 return None
         return f"missing {self.auth_header} header"
+
+    async def emit_event(
+        self,
+        method: str,
+        path: str,
+        status_code: int,
+        client_ip: str,
+        latency_ms: int | None = None,
+        request_headers: dict | None = None,
+        request_body: dict | None = None,
+        response_body: dict | None = None,
+    ):
+        """Broadcast a request/response event to the live dashboard."""
+        event = make_event(
+            provider=self.name,
+            method=method,
+            path=path,
+            status_code=status_code,
+            client_ip=client_ip,
+            latency_ms=latency_ms,
+            request_headers=request_headers,
+            request_body=request_body,
+            response_body=response_body,
+        )
+        await broadcaster.broadcast(event)

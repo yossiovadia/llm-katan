@@ -43,19 +43,10 @@ class OpenAIProvider(Provider):
             # Auth check
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
-                logger.warning(
-                    "openai | %s | 401 | %s", client_ip, auth_err,
-                )
-                return JSONResponse(
-                    status_code=401,
-                    content={
-                        "error": {
-                            "message": auth_err,
-                            "type": "invalid_request_error",
-                            "code": "invalid_api_key",
-                        }
-                    },
-                )
+                logger.warning("openai | %s | 401 | %s", client_ip, auth_err)
+                err_body = {"error": {"message": auth_err, "type": "invalid_request_error", "code": "invalid_api_key"}}
+                await self.emit_event("POST", "/v1/chat/completions", 401, client_ip, response_body=err_body)
+                return JSONResponse(status_code=401, content=err_body)
 
             # Parse and validate request
             try:
@@ -108,10 +99,9 @@ class OpenAIProvider(Provider):
                     yield "data: [DONE]\n\n"
                     elapsed = time.time() - start_time
                     metrics.record(elapsed, prompt_tokens, completion_tokens)
-                    logger.info(
-                        "openai | %s | 200 | stream | %d tokens | %.3fs",
-                        client_ip, prompt_tokens + completion_tokens, elapsed,
-                    )
+                    logger.info("openai | %s | 200 | stream | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
+                    await self.emit_event("POST", "/v1/chat/completions", 200, client_ip, latency_ms=int(elapsed * 1000),
+                                          request_body=body, response_body={"streaming": True, "tokens": prompt_tokens + completion_tokens})
 
                 return StreamingResponse(
                     stream_response(),
@@ -122,12 +112,12 @@ class OpenAIProvider(Provider):
             elapsed = time.time() - start_time
             metrics.record(elapsed, prompt_tokens, completion_tokens)
 
-            logger.info(
-                "openai | %s | 200 | %d tokens | %.3fs",
-                client_ip, prompt_tokens + completion_tokens, elapsed,
-            )
+            logger.info("openai | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-            return self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens)
+            resp_body = self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens)
+            await self.emit_event("POST", "/v1/chat/completions", 200, client_ip, latency_ms=int(elapsed * 1000),
+                                  request_body=body, response_body=resp_body)
+            return resp_body
 
         @app.get("/v1/models")
         async def list_models():

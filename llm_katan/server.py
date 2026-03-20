@@ -10,11 +10,13 @@ import logging
 import time
 from collections import deque
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from .config import ServerConfig
+from .events import broadcaster
 from .model import create_backend
 from .providers import get_provider
 
@@ -23,11 +25,14 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.6.0"
+    __version__ = "0.7.0"
 
 logger = logging.getLogger(__name__)
 
 MAX_RECORDED_RESPONSE_TIMES = 1000
+
+# Load dashboard HTML once at import time
+_DASHBOARD_HTML = (Path(__file__).parent / "dashboard.html").read_text()
 
 
 class ServerMetrics:
@@ -73,6 +78,7 @@ async def lifespan(app: FastAPI):
         provider.register_routes(app)
         logger.info("Registered provider: %s", provider_name)
 
+    logger.info("Dashboard: http://%s:%d/dashboard", config.host, config.port)
     logger.info("LLM Katan ready on %s:%d", config.host, config.port)
     yield
     logger.info("Shutting down LLM Katan")
@@ -127,6 +133,19 @@ def create_app(config: ServerConfig) -> FastAPI:
         )
         return PlainTextResponse(content=text, media_type="text/plain")
 
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard():
+        return _DASHBOARD_HTML
+
+    @app.websocket("/ws/events")
+    async def ws_events(ws: WebSocket):
+        await broadcaster.connect(ws)
+        try:
+            while True:
+                await ws.receive_text()  # keep connection alive
+        except WebSocketDisconnect:
+            broadcaster.disconnect(ws)
+
     @app.get("/")
     async def root():
         return {
@@ -136,6 +155,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             "backend": config.backend,
             "providers": config.providers,
             "docs": "/docs",
+            "dashboard": "/dashboard",
         }
 
     return app

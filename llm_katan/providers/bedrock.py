@@ -102,6 +102,7 @@ class BedrockProvider(Provider):
         auth_err = self.check_auth(dict(raw_request.headers))
         if auth_err:
             logger.warning("bedrock | %s | 401 | %s", client_ip, auth_err)
+            await self.emit_event("POST", raw_request.url.path, 401, client_ip)
             return _bedrock_error(401, auth_err)
 
         try:
@@ -157,7 +158,10 @@ class BedrockProvider(Provider):
         metrics.record(elapsed, prompt_tokens, completion_tokens)
         logger.info("bedrock converse | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-        return self._converse_response(generated_text, prompt_tokens, completion_tokens, elapsed)
+        resp_body = self._converse_response(generated_text, prompt_tokens, completion_tokens, elapsed)
+        await self.emit_event("POST", f"/model/{model_id}/converse", 200, client_ip,
+                              latency_ms=int(elapsed * 1000), request_body=body, response_body=resp_body)
+        return resp_body
 
     @staticmethod
     def _converse_response(text, input_tokens, output_tokens, latency_ms_float):
@@ -228,6 +232,7 @@ class BedrockProvider(Provider):
         auth_err = self.check_auth(dict(raw_request.headers))
         if auth_err:
             logger.warning("bedrock invoke | %s | 401 | %s", client_ip, auth_err)
+            await self.emit_event("POST", raw_request.url.path, 401, client_ip)
             return _bedrock_error(401, auth_err)
 
         try:
