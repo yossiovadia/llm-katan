@@ -464,12 +464,20 @@ function toggleSection(id, btn) {
 }
 
 function syntaxHighlight(json) {
-  return json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"([^"\\]*(\\.[^"\\]*)*)"\s*:/g, '<span class="json-key">"$1"</span>:')
-    .replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, '<span class="json-string">"$1"</span>')
-    .replace(/\b(\d+\.?\d*)\b/g, '<span class="json-number">$1</span>')
-    .replace(/\b(true|false)\b/g, '<span class="json-bool">$1</span>')
-    .replace(/\bnull\b/g, '<span class="json-null">null</span>');
+  // Escape HTML first
+  json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Tokenize and colorize in one pass to avoid double-matching
+  return json.replace(
+    /("(?:[^"\\]|\\.)*")\s*:|("(?:[^"\\]|\\.)*")|(\b\d+\.?\d*\b)|\b(true|false)\b|(null)/g,
+    function(match, key, str, num, bool, nil) {
+      if (key) return '<span class="json-key">' + key + '</span>:';
+      if (str) return '<span class="json-string">' + str + '</span>';
+      if (num) return '<span class="json-number">' + num + '</span>';
+      if (bool) return '<span class="json-bool">' + bool + '</span>';
+      if (nil) return '<span class="json-null">null</span>';
+      return match;
+    }
+  );
 }
 
 function toggleAutoScroll() {
