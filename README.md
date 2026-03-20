@@ -1,448 +1,162 @@
-# LLM Katan - Lightweight LLM Server for Testing
+# LLM Katan
 
-A lightweight LLM serving package using FastAPI and HuggingFace transformers,
-designed for testing and development with real tiny models.
+One tiny model, every LLM API. A lightweight server that exposes real provider API formats (OpenAI, Anthropic, Vertex AI, AWS Bedrock, Azure OpenAI) backed by a single local model or an echo backend. Built for testing AI gateways, API translation layers, and multi-provider routing without burning API keys or cloud credits.
 
-> **🎬 [See Live Demo](https://github.com/yossiovadia/llm-katan)**
-> Interactive terminal showing multi-instance setup in action!
+Katan means "small" in Hebrew.
 
 ## Features
 
-- 🚀 **FastAPI-based**: High-performance async web server
-- 🤗 **HuggingFace Integration**: Real model inference with transformers
-- ⚡ **Tiny Models**: Ultra-lightweight models for fast testing (Qwen3-0.6B, etc.)
-- 🔄 **Multi-Provider**: Serve the same model as OpenAI, Anthropic, and more (Bedrock, Vertex coming soon)
-- 🎯 **API Compatible**: Drop-in replacement for provider endpoints with correct response formats
-- 🔐 **Auth Validation**: Each provider requires its native auth header (e.g., `Authorization` for OpenAI, `x-api-key` for Anthropic)
-- 📦 **PyPI Ready**: Easy installation and distribution
-- 🛠️ **vLLM Support**: Optional vLLM backend for production-like performance
+- **Multi-Provider** — OpenAI, Anthropic, Vertex AI, AWS Bedrock (all 8 model families), Azure OpenAI
+- **Real Inference** — runs actual tiny models (Qwen3-0.6B) via HuggingFace transformers or vLLM
+- **Echo Mode** — instant startup, no model download, no GPU, no torch dependency
+- **Auth Validation** — each provider requires its native auth header
+- **Streaming** — all providers support SSE streaming in their native format
+- **Live Dashboard** — real-time WebSocket-powered view of every request/response at `/dashboard`
+- **Prometheus Metrics** — request counts, token usage, latency at `/metrics`
+- **192 Tests** — extensive coverage for every provider, format, and edge case
 
 ## Quick Start
 
-### Installation
-
-#### Option 1: PyPI
-
 ```bash
 pip install llm-katan
+
+# Echo mode (instant, no dependencies)
+llm-katan --model my-test-model --backend echo --providers openai,anthropic,vertexai,bedrock,azure_openai
+
+# Real model (needs torch + transformers)
+llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock,azure_openai
 ```
 
-#### Option 2: Docker
-
-```bash
-# Pull and run the latest Docker image
-docker pull ghcr.io/yossiovadia/llm-katan/llm-katan:latest
-docker run -p 8000:8000 ghcr.io/yossiovadia/llm-katan/llm-katan:latest
-
-# Or with custom model
-docker run -p 8000:8000 ghcr.io/yossiovadia/llm-katan/llm-katan:latest \
-  llm-katan --served-model-name "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-```
-
-### Setup
-
-#### HuggingFace Token (Required)
-
-LLM Katan uses HuggingFace transformers to download models.
-You'll need a HuggingFace token for:
-
-- Private models
-- Avoiding rate limits
-- Reliable model downloads
-
-#### Option 1: Environment Variable
-
-```bash
-export HUGGINGFACE_HUB_TOKEN="your_token_here"
-```
-
-#### Option 2: Login via CLI
-
-```bash
-huggingface-cli login
-```
-
-#### Option 3: Token file in home directory
-
-```bash
-# Create ~/.cache/huggingface/token file with your token
-echo "your_token_here" > ~/.cache/huggingface/token
-```
-
-**Get your token:**
-Visit [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-
-### Basic Usage
-
-```bash
-# Echo mode — no model download, instant startup, no torch needed
-llm-katan --model my-test-model --backend echo --providers openai,anthropic
-
-# Start server with a tiny model (quantization enabled by default for speed)
-llm-katan --model Qwen/Qwen3-0.6B --port 8000
-
-# Start with custom served model name
-llm-katan --model Qwen/Qwen3-0.6B --port 8001 --served-model-name "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-
-# Disable quantization for higher accuracy (slower)
-llm-katan --model Qwen/Qwen3-0.6B --port 8000 --no-quantize
-
-# With vLLM backend (optional)
-llm-katan --model Qwen/Qwen3-0.6B --port 8000 --backend vllm
-```
-
-### Multi-Instance Testing
-
-**🎬 [Live Demo](https://github.com/yossiovadia/llm-katan)**
-See this in action with animated terminals!
-
-> *Note: If GitHub Pages isn't enabled, you can also
-> [download and open the demo locally](./terminal-demo.html)*
-
-<!-- markdownlint-disable MD033 -->
-<details>
-<summary>📺 Preview (click to expand)</summary>
-<!-- markdownlint-enable MD033 -->
-
-```bash
-# Terminal 1: Installing and starting GPT-3.5-Turbo mock
-$ pip install llm-katan
-Successfully installed llm-katan-0.1.8
-
-$ llm-katan --model Qwen/Qwen3-0.6B --port 8000 --served-model-name "gpt-3.5-turbo"
-🚀 Starting LLM Katan server with model: Qwen/Qwen3-0.6B
-📛 Served model name: gpt-3.5-turbo
-✅ Server running on http://0.0.0.0:8000
-
-# Terminal 2: Starting Claude-3-Haiku mock
-$ llm-katan --model Qwen/Qwen3-0.6B --port 8001 --served-model-name "claude-3-haiku"
-🚀 Starting LLM Katan server with model: Qwen/Qwen3-0.6B
-📛 Served model name: claude-3-haiku
-✅ Server running on http://0.0.0.0:8001
-
-# Terminal 3: Testing both endpoints
-$ curl localhost:8000/v1/models | jq '.data[0].id'
-"gpt-3.5-turbo"
-
-$ curl localhost:8001/v1/models | jq '.data[0].id'
-"claude-3-haiku"
-
-# Same tiny model, different API names! 🎯
-```
-
-</details>
-
-```bash
-# Terminal 1: Mock GPT-3.5-Turbo
-llm-katan --model Qwen/Qwen3-0.6B --port 8000 --served-model-name "gpt-3.5-turbo"
-
-# Terminal 2: Mock Claude-3-Haiku
-llm-katan --model Qwen/Qwen3-0.6B --port 8001 --served-model-name "claude-3-haiku"
-
-# Terminal 3: Test both endpoints
-curl http://localhost:8000/v1/models  # Returns "gpt-3.5-turbo"
-curl http://localhost:8001/v1/models  # Returns "claude-3-haiku"
-```
-
-**Perfect for testing multi-provider scenarios with one tiny model!**
+Then open `http://localhost:8000/dashboard` to watch requests flow through in real-time.
 
 ## How It Works
 
-llm-katan does **not** proxy requests to real providers. There is no OpenAI SDK, no Anthropic SDK, no cloud API calls. Instead, each provider is a thin formatting layer around the same local model:
+The server does not proxy to real providers. Each provider is a formatting layer around the same backend:
 
 ```
 Request (any provider format)
        |
-       v
-Provider (openai.py / anthropic.py / ...)
-  - Parses the provider-specific request format
+Provider (openai / anthropic / vertexai / bedrock / azure_openai)
+  - Parses provider-specific request
   - Extracts: messages, max_tokens, temperature
-  - Normalizes to plain Python dicts
        |
-       v
-Backend (model.py)
-  - Converts messages to a prompt string
-  - Feeds it directly to the local model (e.g., Qwen3-0.6B)
-  - Returns: generated text + token counts
+Backend (echo or real model)
+  - Generates text (or echoes request metadata)
        |
-       v
-Provider (same one that handled the request)
-  - Wraps the raw text in the provider's native response format
+Provider (same one)
+  - Formats response in provider's native format
   - Returns to client
 ```
 
-So Anthropic format in, Anthropic format out. OpenAI format in, OpenAI format out. The backend has zero knowledge of any provider format — it just generates text. No translation chain, no provider in the middle.
+No translation chain, no SDK calls, no cloud API costs.
 
-## API Endpoints
+## Supported Providers
 
-**Shared (no auth required):**
-- `GET /` - Server info (version, model, backend, providers)
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `GET /dashboard` - Live request/response dashboard (WebSocket-powered)
-- `GET /docs` - Swagger UI (interactive API docs)
-- `GET /redoc` - ReDoc (alternative API docs)
+**OpenAI** (`--providers openai`)
+- `POST /v1/chat/completions` — Auth: `Authorization: Bearer <key>`
+- `GET /v1/models`
 
-**OpenAI** (`--providers openai`):
-- `GET /v1/models` - List available models
-- `POST /v1/chat/completions` - Chat completions (OpenAI compatible)
+**Anthropic** (`--providers anthropic`)
+- `POST /v1/messages` — Auth: `x-api-key: <key>`
 
-**Anthropic** (`--providers anthropic`):
-- `POST /v1/messages` - Messages API (Anthropic compatible, with SSE streaming)
+**Vertex AI / Gemini** (`--providers vertexai`)
+- `POST /v1beta/models/{model}:generateContent` — Auth: `Authorization: Bearer <token>`
+- `POST /v1beta/models/{model}:streamGenerateContent`
 
-**Vertex AI / Gemini** (`--providers vertexai`):
-- `POST /v1beta/models/{model}:generateContent` - Generate content
-- `POST /v1beta/models/{model}:streamGenerateContent` - Streaming generate content
-- Also supports `/v1/` prefix
+**AWS Bedrock** (`--providers bedrock`)
+- `POST /model/{modelId}/converse` — Auth: `Authorization: AWS4-HMAC-SHA256 <sig>`
+- `POST /model/{modelId}/converse-stream`
+- `POST /model/{modelId}/invoke` — auto-detects model family:
 
-**AWS Bedrock** (`--providers bedrock`):
-- `POST /model/{modelId}/converse` - Converse API (unified, model-agnostic)
-- `POST /model/{modelId}/converse-stream` - Streaming Converse API
-- `POST /model/{modelId}/invoke` - InvokeModel with all model families:
+| Family | Model ID Prefix | Request Format |
+|--------|----------------|----------------|
+| Anthropic Claude | `anthropic.*` | `messages[]`, `max_tokens`, `system` |
+| Amazon Nova | `amazon.nova*` | `messages[].content[].text`, `inferenceConfig` |
+| Amazon Titan | `amazon.titan*` | `inputText`, `textGenerationConfig` |
+| Meta Llama | `meta.llama*` | `prompt`, `max_gen_len` |
+| Cohere Command | `cohere.*` | `message`, `chat_history[]` |
+| Mistral | `mistral.*` | `prompt`, `max_tokens` |
+| DeepSeek | `deepseek.*` | `prompt`, `max_tokens` |
+| AI21 Jamba | `ai21.*` | `messages[]` (OpenAI-like) |
 
-| Model Family | Model ID Prefix | Request Format |
-|---|---|---|
-| Anthropic Claude | `anthropic.*` | Messages API (`messages`, `max_tokens`, content blocks) |
-| Amazon Nova | `amazon.nova*` | Messages + content blocks + `inferenceConfig` |
-| Amazon Titan | `amazon.titan*` | `inputText` + `textGenerationConfig` |
-| Meta Llama | `meta.llama*` | `prompt` + `max_gen_len` |
-| Cohere Command | `cohere.*` | `message` + `chat_history` |
-| Mistral | `mistral.*` | `prompt` + `max_tokens` |
-| DeepSeek | `deepseek.*` | `prompt` + `max_tokens` |
-| AI21 Jamba | `ai21.*` | `messages` (OpenAI-like) |
+**Azure OpenAI** (`--providers azure_openai`)
+- `POST /openai/deployments/{id}/chat/completions` — Auth: `api-key: <key>`
 
-Unknown model IDs fall back to Amazon Titan format.
+**Shared endpoints** (no auth)
+- `GET /` — server info
+- `GET /health` — health check
+- `GET /metrics` — Prometheus metrics
+- `GET /dashboard` — live request/response dashboard
+- `GET /docs` — Swagger UI
 
-**Azure OpenAI** (`--providers azure_openai`):
-- `POST /openai/deployments/{deployment-id}/chat/completions` - Chat completions (same format as OpenAI, different URL + `api-key` header auth)
-- Supports `?api-version=2024-10-21` query parameter
-- Response includes Azure-specific `content_filter_results` and `prompt_filter_results`
-
-Enable all providers at once: `--providers openai,anthropic,vertexai,bedrock,azure_openai`
-
-### Example API Usage
+## Example Requests
 
 ```bash
-# Basic chat completion
-curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+# OpenAI
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer test-key" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2-0.5B-Instruct",
-    "messages": [
-      {"role": "user", "content": "What is the capital of France?"}
-    ],
-    "max_tokens": 50,
-    "temperature": 0.7
-  }'
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}]}'
 
-# Creative writing example
-curl -X POST http://127.0.0.1:8001/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    "messages": [
-      {"role": "user", "content": "Write a short poem about coding"}
-    ],
-    "max_tokens": 100,
-    "temperature": 0.8
-  }'
-
-# Check available models
-curl http://127.0.0.1:8000/v1/models
-
-# Health check
-curl http://127.0.0.1:8000/health
-
-# Anthropic Messages API
-curl -X POST http://127.0.0.1:8000/v1/messages \
-  -H "Content-Type: application/json" \
+# Anthropic
+curl -X POST http://localhost:8000/v1/messages \
   -H "x-api-key: test-key" \
   -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "claude-test",
-    "max_tokens": 50,
-    "messages": [
-      {"role": "user", "content": "What is the capital of France?"}
-    ]
-  }'
-
-# Vertex AI / Gemini API
-curl -X POST http://127.0.0.1:8000/v1beta/models/gemini-pro:generateContent \
   -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}'
+
+# Vertex AI
+curl -X POST http://localhost:8000/v1beta/models/gemini-pro:generateContent \
   -H "Authorization: Bearer test-token" \
-  -d '{
-    "contents": [
-      {"role": "user", "parts": [{"text": "What is the capital of France?"}]}
-    ]
-  }'
-
-# AWS Bedrock Converse API
-curl -X POST http://127.0.0.1:8000/model/anthropic.claude-v2/converse \
   -H "Content-Type: application/json" \
-  -H "Authorization: AWS4-HMAC-SHA256 Credential=test" \
-  -d '{
-    "messages": [
-      {"role": "user", "content": [{"text": "What is the capital of France?"}]}
-    ]
-  }'
+  -d '{"contents":[{"role":"user","parts":[{"text":"Hello"}]}]}'
 
-# AWS Bedrock InvokeModel (Anthropic Claude)
-curl -X POST http://127.0.0.1:8000/model/anthropic.claude-v2/invoke \
-  -H "Content-Type: application/json" \
+# Bedrock Converse
+curl -X POST http://localhost:8000/model/anthropic.claude-v2/converse \
   -H "Authorization: AWS4-HMAC-SHA256 Credential=test" \
-  -d '{
-    "anthropic_version": "bedrock-2023-05-31",
-    "max_tokens": 100,
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"text":"Hello"}]}]}'
 
 # Azure OpenAI
-curl -X POST http://127.0.0.1:8000/openai/deployments/gpt-4/chat/completions?api-version=2024-10-21 \
-  -H "Content-Type: application/json" \
+curl -X POST "http://localhost:8000/openai/deployments/gpt-4/chat/completions?api-version=2024-10-21" \
   -H "api-key: test-key" \
-  -d '{
-    "messages": [{"role": "user", "content": "What is the capital of France?"}]
-  }'
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-## CPU Optimization
+## CLI Options
 
-LLM Katan includes **automatic int8 quantization** for CPU inference, providing significant performance improvements:
-
-### Performance Gains
-
-- **2-4x faster inference** on CPU (on supported platforms)
-- **4x memory reduction**
-- **Enabled by default** for best testing experience
-- **Minimal quality impact** (acceptable for testing scenarios)
-- **Platform support**: Works best on Linux x86_64; may not be available on all platforms (e.g., Mac)
-
-### When to Use Quantization
-
-✅ **Enabled (default)** - Recommended for:
-
-- Fast E2E testing
-- Development environments
-- CI/CD pipelines
-- Resource-constrained environments
-
-❌ **Disabled (--no-quantize)** - Use when you need:
-
-- Maximum accuracy (though tiny models have limited accuracy anyway)
-- Debugging precision-sensitive issues
-- Comparing with full-precision baselines
-
-### Example Performance
-
-```bash
-# Default: Fast with quantization (~50-100s per inference)
-llm-katan --model Qwen/Qwen3-0.6B
-
-# Slower but more accurate (~200s per inference)
-llm-katan --model Qwen/Qwen3-0.6B --no-quantize
 ```
-
-> **Note**: Even with quantization, llm-katan is slower than production tools like LM Studio (which uses llama.cpp with extensive optimizations). For production workloads, use vLLM, Ollama, or similar solutions.
-
-## Use Cases
-
-### Strengths
-
-- **Fastest time-to-test**: 30 seconds from install to running
-- **Optimized for CPU**: Automatic int8 quantization for 2-4x speedup
-- **Minimal resource footprint**: Designed for tiny models and efficient testing
-- **No GPU required**: Runs on laptops, Macs, and any CPU-only environment
-- **CI/CD integration friendly**: Lightweight and automation-ready
-- **Multiple instances**: Run same model with different names on different ports
-
-### Ideal For
-
-- **Automated testing pipelines**: Quick LLM endpoint setup for test suites
-- **Development environment mocking**: Real inference without production overhead
-- **Quick prototyping**: Fast iteration with actual model behavior
-- **Educational/learning scenarios**: Easy setup for AI development learning
-
-### Not Ideal For
-
-- **Production workloads**: Use Ollama or vLLM for production deployments
-- **Large model serving**: Designed for tiny models (< 1B parameters)
-- **Complex multi-agent workflows**: Use Semantic Kernel or similar frameworks
-- **High-performance inference**: Use vLLM or specialized serving solutions
-
-## Configuration
-
-### Command Line Options
-
-```bash
-# All available options
 llm-katan [OPTIONS]
 
 Required:
-  -m, --model TEXT              Model name to load (e.g., 'Qwen/Qwen3-0.6B') [required]
+  -m, --model TEXT              Model name (or any string in echo mode)
 
 Optional:
-  -n, --name, --served-model-name TEXT
-                                Model name to serve via API (defaults to model name)
-  -p, --port INTEGER            Port to serve on (default: 8000)
-  -h, --host TEXT               Host to bind to (default: 0.0.0.0)
-  -b, --backend [transformers|vllm|echo]  Backend to use (default: transformers)
-  --max, --max-tokens INTEGER   Maximum tokens to generate (default: 512)
-  -t, --temperature FLOAT       Sampling temperature (default: 0.7)
-  -d, --device [auto|cpu|cuda]  Device to use (default: auto)
-  --quantize/--no-quantize      Enable int8 quantization for faster CPU inference (default: enabled)
-  --providers TEXT               Comma-separated providers to enable (default: openai)
-  --max-concurrent INTEGER      Max concurrent inference requests (default: 1)
+  -b, --backend [transformers|vllm|echo]  Backend (default: transformers)
+  --providers TEXT              Comma-separated providers (default: openai)
+  -p, --port INTEGER            Port (default: 8000)
+  -n, --served-model-name TEXT  Model name in API responses
+  --max-tokens INTEGER          Max tokens (default: 512)
+  -t, --temperature FLOAT       Temperature (default: 0.7)
+  -d, --device [auto|cpu|cuda]  Device (default: auto)
+  --quantize/--no-quantize      CPU int8 quantization (default: enabled)
+  --max-concurrent INTEGER      Concurrent requests (default: 1)
   --log-level [debug|info|warning|error]  Log level (default: INFO)
-  --version                     Show version and exit
-  --help                        Show help and exit
 ```
-
-#### Advanced Usage Examples
-
-```bash
-# Serve all provider endpoints (auth always required per provider)
-llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock,azure_openai
-
-# Custom generation settings
-llm-katan --model Qwen/Qwen3-0.6B --max-tokens 1024 --temperature 0.9
-
-# Force specific device with full precision (no quantization)
-llm-katan --model Qwen/Qwen3-0.6B --device cpu --no-quantize --log-level debug
-
-# Custom host and port
-llm-katan --model Qwen/Qwen3-0.6B --host 127.0.0.1 --port 9000
-
-# Multiple servers with different settings
-llm-katan --model Qwen/Qwen3-0.6B --port 8000 --max-tokens 512 --temperature 0.1
-llm-katan --model Qwen/Qwen3-0.6B --port 8001 \
-  --name "TinyLlama/TinyLlama-1.1B-Chat-v1.0" --max-tokens 256 --temperature 0.9
-```
-
-### Environment Variables
-
-- `LLM_KATAN_MODEL`: Default model to load
-- `LLM_KATAN_PORT`: Default port (8000)
-- `LLM_KATAN_BACKEND`: Backend type (transformers|vllm)
 
 ## Development
 
 ```bash
-# Clone and install in development mode
-git clone <repo>
+git clone https://github.com/yossiovadia/llm-katan.git
 cd llm-katan
-pip install -e .
-
-# Run with development dependencies
 pip install -e ".[dev]"
+pytest tests/ -v
 ```
 
 ## License
 
-Apache-2.0 License
-
-## Contributing
-
-Contributions welcome! Please see the main repository for guidelines.
+Apache-2.0
 
 ---
 
