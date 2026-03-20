@@ -76,7 +76,6 @@ class AzureOpenAIProvider(Provider):
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
                 logger.warning("azure_openai | %s | 401 | %s", client_ip, auth_err)
-                await self.emit_event("POST", raw_request.url.path, 401, client_ip)
                 return _azure_error(401, auth_err)
 
             # Parse request
@@ -144,8 +143,6 @@ class AzureOpenAIProvider(Provider):
             logger.info("azure_openai | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
             resp_body = self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens)
-            await self.emit_event("POST", raw_request.url.path, 200, client_ip,
-                                  latency_ms=int(elapsed * 1000), request_body=body, response_body=resp_body)
             return resp_body
 
     @staticmethod

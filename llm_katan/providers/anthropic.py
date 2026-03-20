@@ -104,8 +104,6 @@ class AnthropicProvider(Provider):
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
                 logger.warning("anthropic | %s | 401 | %s", client_ip, auth_err)
-                await self.emit_event("POST", "/v1/messages", 401, client_ip,
-                                      response_body={"type": "error", "error": {"type": "authentication_error", "message": auth_err}})
                 return _anthropic_error(401, auth_err)
 
             # Check anthropic-version header
@@ -184,8 +182,6 @@ class AnthropicProvider(Provider):
             logger.info("anthropic | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
             resp_body = self._full_response(msg_id, model_name, generated_text, prompt_tokens, completion_tokens)
-            await self.emit_event("POST", "/v1/messages", 200, client_ip, latency_ms=int(elapsed * 1000),
-                                  request_body=body, response_body=resp_body)
             return resp_body
 
     @staticmethod

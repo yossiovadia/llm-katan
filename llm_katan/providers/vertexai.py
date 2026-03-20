@@ -92,7 +92,6 @@ class VertexAIProvider(Provider):
         auth_err = self.check_auth(dict(raw_request.headers))
         if auth_err:
             logger.warning("vertexai | %s | 401 | %s", client_ip, auth_err)
-            await self.emit_event("POST", raw_request.url.path, 401, client_ip)
             return _gemini_error(401, auth_err)
 
         # Parse request body
@@ -160,8 +159,6 @@ class VertexAIProvider(Provider):
         logger.info("vertexai | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
         resp_body = self._full_response(model_name, generated_text, prompt_tokens, completion_tokens)
-        await self.emit_event("POST", raw_request.url.path, 200, client_ip, latency_ms=int(elapsed * 1000),
-                              request_body=body, response_body=resp_body)
         return resp_body
 
     @staticmethod

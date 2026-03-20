@@ -6,6 +6,7 @@ Mounts provider-specific routes (OpenAI, Anthropic, etc.) on a single server.
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
 
+import json
 import logging
 import time
 from collections import deque
@@ -14,9 +15,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import ServerConfig
-from .events import broadcaster
+from .events import broadcaster, make_event
 from .model import create_backend
 from .providers import get_provider
 
@@ -25,7 +27,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.7.1"
+    __version__ = "0.7.2"
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,104 @@ class ServerMetrics:
         if not self.response_times:
             return 0.0
         return sum(self.response_times) / len(self.response_times)
+
+
+# Provider detection from URL path
+_PROVIDER_ROUTES = {
+    "/v1/chat/completions": "openai",
+    "/v1/messages": "anthropic",
+    "/v1/models": "openai",
+}
+
+
+def _detect_provider(path: str) -> str | None:
+    """Detect which provider handled a request from the URL path."""
+    if path in _PROVIDER_ROUTES:
+        return _PROVIDER_ROUTES[path]
+    if path.startswith("/v1beta/models/") or path.startswith("/v1/models/"):
+        if ":generateContent" in path or ":streamGenerateContent" in path:
+            return "vertexai"
+    if path.startswith("/model/"):
+        if "/converse" in path or "/invoke" in path:
+            return "bedrock"
+    if path.startswith("/openai/deployments/"):
+        return "azure_openai"
+    return None
+
+
+class DashboardMiddleware(BaseHTTPMiddleware):
+    """Captures request/response for every provider endpoint and broadcasts to dashboard."""
+
+    _SKIP = {"/", "/health", "/metrics", "/dashboard", "/docs", "/redoc", "/openapi.json", "/ws/events"}
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if path in self._SKIP:
+            return await call_next(request)
+
+        provider = _detect_provider(path)
+        if provider is None:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        method = request.method
+
+        # Capture request body
+        req_body = None
+        try:
+            body_bytes = await request.body()
+            if body_bytes:
+                req_body = json.loads(body_bytes)
+        except Exception:
+            pass
+
+        # Capture request headers (skip noisy ones)
+        skip_headers = {"host", "content-length", "connection", "accept-encoding", "accept"}
+        req_headers = {k: v for k, v in request.headers.items() if k.lower() not in skip_headers}
+
+        start = time.time()
+        response = await call_next(request)
+        elapsed = time.time() - start
+
+        # Capture response body
+        resp_body = None
+        resp_body_bytes = b""
+        async for chunk in response.body_iterator:
+            if isinstance(chunk, str):
+                resp_body_bytes += chunk.encode()
+            else:
+                resp_body_bytes += chunk
+
+        try:
+            resp_body = json.loads(resp_body_bytes)
+        except Exception:
+            # Streaming or non-JSON response
+            resp_body = {"_raw": resp_body_bytes[:500].decode(errors="replace")} if resp_body_bytes else None
+
+        # Rebuild response with consumed body
+        from starlette.responses import Response
+        new_response = Response(
+            content=resp_body_bytes,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
+
+        # Broadcast to dashboard
+        event = make_event(
+            provider=provider,
+            method=method,
+            path=path,
+            status_code=response.status_code,
+            client_ip=client_ip,
+            latency_ms=int(elapsed * 1000),
+            request_headers=req_headers,
+            request_body=req_body,
+            response_body=resp_body,
+        )
+        await broadcaster.broadcast(event)
+
+        return new_response
 
 
 @asynccontextmanager
@@ -95,6 +195,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.config = config
+    app.add_middleware(DashboardMiddleware)
 
     @app.get("/health")
     async def health():
