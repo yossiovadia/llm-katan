@@ -133,11 +133,7 @@ class OpenAIProvider(Provider):
                     "finish_reason": "stop",
                 }
             ],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
+            # BUG: usage field missing from streaming final chunk
         }
 
     @staticmethod
