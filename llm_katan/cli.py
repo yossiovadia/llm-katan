@@ -18,7 +18,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.8.2"
+    __version__ = "0.9.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,6 +74,12 @@ logger = logging.getLogger(__name__)
     default="openai",
     help="Comma-separated list of API providers to enable (default: openai)",
 )
+@click.option(
+    "--tls",
+    is_flag=True,
+    default=False,
+    help="Enable HTTPS with auto-generated self-signed certificate",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -88,6 +94,7 @@ def main(
     quantize: bool,
     max_concurrent: int,
     providers: str,
+    tls: bool,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -124,8 +131,10 @@ def main(
         quantize=quantize,
         max_concurrent=max_concurrent,
         providers=provider_list,
+        tls=tls,
     )
 
+    protocol = "https" if config.tls else "http"
     click.echo(f"LLM Katan v{__version__}")
     click.echo(f"  Model:     {config.model_name}")
     click.echo(f"  Served:    {config.served_model_name}")
@@ -134,7 +143,9 @@ def main(
     if config.device_auto == "cpu":
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
-    click.echo(f"  Server:    http://{config.host}:{config.port}")
+    if config.tls:
+        click.echo(f"  TLS:       enabled (self-signed)")
+    click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()
 
     if config.backend != "echo":

@@ -27,7 +27,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.8.2"
+    __version__ = "0.9.0"
 
 logger = logging.getLogger(__name__)
 
@@ -268,12 +268,72 @@ def create_app(config: ServerConfig) -> FastAPI:
     return app
 
 
+def _generate_self_signed_cert():
+    """Generate a self-signed TLS cert and key, return (certfile, keyfile) paths."""
+    import datetime
+    import ipaddress
+    import tempfile
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "llm-katan"),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("*"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    certfile = tempfile.NamedTemporaryFile(suffix=".pem", delete=False)
+    certfile.write(cert.public_bytes(serialization.Encoding.PEM))
+    certfile.close()
+
+    keyfile = tempfile.NamedTemporaryFile(suffix=".pem", delete=False)
+    keyfile.write(key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ))
+    keyfile.close()
+
+    return certfile.name, keyfile.name
+
+
 async def run_server(config: ServerConfig):
     """Run the server with uvicorn."""
     import uvicorn
 
     app = create_app(config)
+
+    ssl_kwargs = {}
+    if config.tls:
+        certfile, keyfile = _generate_self_signed_cert()
+        ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
+        logger.info("TLS enabled (self-signed certificate)")
+
+    protocol = "https" if config.tls else "http"
+    logger.info("Server URL: %s://%s:%d", protocol, config.host, config.port)
+
     server = uvicorn.Server(
-        uvicorn.Config(app, host=config.host, port=config.port, log_level="info")
+        uvicorn.Config(app, host=config.host, port=config.port, log_level="info", **ssl_kwargs)
     )
     await server.serve()
