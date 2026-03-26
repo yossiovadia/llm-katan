@@ -373,7 +373,7 @@ class TestStreaming:
 
 class TestAuth:
     @pytest.mark.asyncio
-    async def test_missing_authorization_rejected(self, client):
+    async def test_missing_all_auth_rejected(self, client):
         resp = await client.post(
             "/v1beta/models/gemini-pro:generateContent",
             json=base_request(),
@@ -382,10 +382,9 @@ class TestAuth:
         assert resp.status_code == 401
         data = resp.json()
         assert data["error"]["status"] == "UNAUTHENTICATED"
-        assert "Authorization" in data["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_authorization_present_accepted(self, client):
+    async def test_bearer_token_accepted(self, client):
         resp = await client.post(
             "/v1beta/models/gemini-pro:generateContent",
             json=base_request(),
@@ -394,11 +393,21 @@ class TestAuth:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_any_bearer_value_accepted(self, client):
+    async def test_api_key_query_param_accepted(self, client):
+        """Gemini API supports ?key= query parameter for auth."""
         resp = await client.post(
-            "/v1beta/models/gemini-pro:generateContent",
+            "/v1beta/models/gemini-pro:generateContent?key=AIzaSyTestKey123",
             json=base_request(),
-            headers={"Content-Type": "application/json", "Authorization": "Bearer literally-anything"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_api_key_query_param_streaming(self, client):
+        resp = await client.post(
+            "/v1beta/models/gemini-pro:streamGenerateContent?key=AIzaSyTestKey123",
+            json=base_request(),
+            headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
 

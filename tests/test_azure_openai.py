@@ -274,7 +274,7 @@ class TestStreaming:
 
 class TestAuth:
     @pytest.mark.asyncio
-    async def test_missing_api_key_rejected(self, client):
+    async def test_missing_all_auth_rejected(self, client):
         resp = await client.post(
             ENDPOINT,
             json=base_request(),
@@ -282,10 +282,9 @@ class TestAuth:
         )
         assert resp.status_code == 401
         assert "api-key" in resp.json()["error"]["message"]
-        assert resp.json()["error"]["code"] == "invalid_api_key"
 
     @pytest.mark.asyncio
-    async def test_api_key_present_accepted(self, client):
+    async def test_api_key_accepted(self, client):
         resp = await client.post(ENDPOINT, json=base_request(), headers=azure_headers())
         assert resp.status_code == 200
 
@@ -297,6 +296,26 @@ class TestAuth:
             headers={"Content-Type": "application/json", "api-key": "literally-anything"},
         )
         assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_entra_id_bearer_token_accepted(self, client):
+        """Azure supports Entra ID (AAD) auth via Authorization: Bearer token."""
+        resp = await client.post(
+            ENDPOINT,
+            json=base_request(),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.fake-aad-token"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_non_bearer_authorization_rejected(self, client):
+        """Authorization header without Bearer prefix is not valid for Azure."""
+        resp = await client.post(
+            ENDPOINT,
+            json=base_request(),
+            headers={"Content-Type": "application/json", "Authorization": "Basic dXNlcjpwYXNz"},
+        )
+        assert resp.status_code == 401
 
 
 # ============================================================

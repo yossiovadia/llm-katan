@@ -65,7 +65,23 @@ def _azure_error(status_code: int, message: str) -> JSONResponse:
 
 class AzureOpenAIProvider(Provider):
     name = "azure_openai"
-    auth_header = "api-key"
+    auth_header = "api-key"  # primary, but we also accept Authorization: Bearer (Entra ID)
+
+    def check_auth(self, headers: dict) -> str | None:
+        """Azure supports two auth methods: api-key header OR Authorization: Bearer (Entra ID/AAD)."""
+        has_api_key = False
+        has_bearer = False
+
+        for key, value in headers.items():
+            key_lower = key.lower()
+            if key_lower == "api-key":
+                has_api_key = True
+            elif key_lower == "authorization" and value.startswith("Bearer "):
+                has_bearer = True
+
+        if has_api_key or has_bearer:
+            return None
+        return "missing api-key header or Authorization: Bearer token (Entra ID)"
 
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/openai/deployments/{deployment_id}/chat/completions")

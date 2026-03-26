@@ -66,6 +66,16 @@ class VertexAIProvider(Provider):
     name = "vertexai"
     auth_header = "Authorization"
 
+    def check_auth_with_request(self, headers: dict, query_params) -> str | None:
+        """Vertex/Gemini supports Authorization: Bearer OR ?key= query parameter."""
+        # Check header first
+        if self.check_auth(headers) is None:
+            return None
+        # Fall back to ?key= query param (Gemini API style)
+        if query_params.get("key"):
+            return None
+        return "missing Authorization header or ?key= query parameter"
+
     def register_routes(self, app: FastAPI) -> None:
         # Gemini API format: /v1beta/models/{model}:generateContent
         @app.post("/v1beta/models/{model}:generateContent")
@@ -88,8 +98,8 @@ class VertexAIProvider(Provider):
     async def _handle_request(self, model: str, raw_request: Request, app: FastAPI, stream: bool):
         client_ip = raw_request.client.host if raw_request.client else "unknown"
 
-        # Auth check
-        auth_err = self.check_auth(dict(raw_request.headers))
+        # Auth check (header or ?key= query param)
+        auth_err = self.check_auth_with_request(dict(raw_request.headers), raw_request.query_params)
         if auth_err:
             logger.warning("vertexai | %s | 401 | %s", client_ip, auth_err)
             return _gemini_error(401, auth_err)
