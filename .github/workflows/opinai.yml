@@ -17,4 +17,6 @@ jobs:
       - uses: yossiovadia/opinai@main
         with:
           issue_number: ${{ github.event.issue.number }}
+          install_command: 'pip install llm-katan'
+          server_command: 'llm-katan --model test --backend echo --providers openai,anthropic,vertexai,bedrock,azure_openai --port 8000'
           github_token: ${{ secrets.GITHUB_TOKEN }}
