@@ -77,6 +77,43 @@ class BedrockProvider(Provider):
     name = "bedrock"
     auth_header = "Authorization"
 
+    def check_auth(self, headers: dict) -> str | None:
+        """Validate AWS SigV4 auth headers for Bedrock.
+
+        Checks:
+        1. Authorization header exists and starts with AWS4-HMAC-SHA256
+        2. x-amz-date header is present
+        3. x-amz-security-token header (logged as warning if missing, not rejected)
+        """
+        auth_value = None
+        has_amz_date = False
+        has_security_token = False
+
+        for key, value in headers.items():
+            key_lower = key.lower()
+            if key_lower == "authorization":
+                auth_value = value
+            elif key_lower == "x-amz-date":
+                has_amz_date = True
+            elif key_lower == "x-amz-security-token":
+                has_security_token = True
+
+        if auth_value is None:
+            return "missing Authorization header"
+
+        if not auth_value.startswith("AWS4-HMAC-SHA256"):
+            # Also accept Bearer for backward compat with OpenAI-compatible Bedrock endpoint
+            if not auth_value.startswith("Bearer "):
+                return "Authorization header must start with 'AWS4-HMAC-SHA256' or 'Bearer'"
+
+        if auth_value.startswith("AWS4-HMAC-SHA256") and not has_amz_date:
+            return "missing x-amz-date header (required for SigV4)"
+
+        if auth_value.startswith("AWS4-HMAC-SHA256") and not has_security_token:
+            logger.info("bedrock | x-amz-security-token not present (optional, only needed for temporary credentials)")
+
+        return None
+
     def register_routes(self, app: FastAPI) -> None:
         # Converse API (unified, model-agnostic)
         @app.post("/model/{model_id}/converse")

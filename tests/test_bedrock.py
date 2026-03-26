@@ -61,7 +61,8 @@ async def client():
 def bedrock_headers():
     return {
         "Content-Type": "application/json",
-        "Authorization": "AWS4-HMAC-SHA256 Credential=test",
+        "Authorization": "AWS4-HMAC-SHA256 Credential=AKID/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=test",
+        "x-amz-date": "20260326T120000Z",
     }
 
 
@@ -804,7 +805,8 @@ class TestAuth:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_auth_present_accepted(self, client):
+    async def test_sigv4_auth_accepted(self, client):
+        """SigV4 auth with all required headers."""
         resp = await client.post(
             "/model/test/converse",
             json=converse_request(),
@@ -813,11 +815,66 @@ class TestAuth:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_any_auth_value_accepted(self, client):
+    async def test_bearer_auth_accepted(self, client):
+        """Bearer auth for OpenAI-compatible Bedrock endpoint."""
         resp = await client.post(
             "/model/test/converse",
             json=converse_request(),
-            headers={"Content-Type": "application/json", "Authorization": "literally-anything"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer sk-bedrock-key"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_invalid_auth_format_rejected(self, client):
+        """Auth that's neither SigV4 nor Bearer is rejected."""
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={"Content-Type": "application/json", "Authorization": "Basic dXNlcjpwYXNz"},
+        )
+        assert resp.status_code == 401
+        assert "AWS4-HMAC-SHA256" in resp.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_sigv4_missing_amz_date_rejected(self, client):
+        """SigV4 without x-amz-date is rejected."""
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "AWS4-HMAC-SHA256 Credential=AKID/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc123",
+            },
+        )
+        assert resp.status_code == 401
+        assert "x-amz-date" in resp.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_sigv4_with_security_token(self, client):
+        """SigV4 with temporary credentials (security token)."""
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "AWS4-HMAC-SHA256 Credential=AKID/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc123",
+                "x-amz-date": "20260326T120000Z",
+                "x-amz-security-token": "FwoGZXIvYXdzEBYaDH...",
+            },
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_sigv4_without_security_token(self, client):
+        """SigV4 without security token (long-term credentials) still accepted."""
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "AWS4-HMAC-SHA256 Credential=AKID/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc123",
+                "x-amz-date": "20260326T120000Z",
+            },
         )
         assert resp.status_code == 200
 

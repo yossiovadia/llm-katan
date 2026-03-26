@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-katan"
-version = "0.7.3"
+version = "0.8.0"
 description = "One tiny model, every LLM API. Drop-in test server for OpenAI, Anthropic, Bedrock, and Vertex."
 readme = "README.md"
 authors = [
