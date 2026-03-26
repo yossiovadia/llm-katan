@@ -27,7 +27,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.8.1"
+    __version__ = "0.8.2"
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +68,16 @@ _PROVIDER_ROUTES = {
 }
 
 
-def _detect_provider(path: str) -> str | None:
-    """Detect which provider handled a request from the URL path."""
+def _detect_provider(path: str, headers: dict | None = None) -> str | None:
+    """Detect which provider handled a request from the URL path and headers."""
     if path in _PROVIDER_ROUTES:
-        return _PROVIDER_ROUTES[path]
+        provider = _PROVIDER_ROUTES[path]
+        # Check if this is actually Bedrock's OpenAI-compatible endpoint (SigV4 auth on /v1/chat/completions)
+        if provider == "openai" and headers:
+            auth = headers.get("authorization", "")
+            if auth.startswith("AWS4-HMAC-SHA256"):
+                return "bedrock (openai-compat)"
+        return provider
     if path.startswith("/v1beta/models/") or path.startswith("/v1/models/"):
         if ":generateContent" in path or ":streamGenerateContent" in path:
             return "vertexai"
@@ -93,7 +99,7 @@ class DashboardMiddleware(BaseHTTPMiddleware):
         if path in self._SKIP:
             return await call_next(request)
 
-        provider = _detect_provider(path)
+        provider = _detect_provider(path, dict(request.headers))
         if provider is None:
             return await call_next(request)
 

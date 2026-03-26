@@ -398,14 +398,17 @@ function addEvent(evt) {
   const card = document.createElement('div');
   card.className = 'event';
 
-  const providerClass = (evt.provider || 'unknown').replace(/[^a-z_]/g, '');
+  const providerRaw = evt.provider || 'unknown';
+  const providerClass = providerRaw.startsWith('bedrock') ? 'bedrock' : providerRaw.replace(/[^a-z_]/g, '');
   const providerLabel = {
     'openai': 'OpenAI',
     'anthropic': 'Anthropic',
     'vertexai': 'Vertex AI',
     'bedrock': 'Bedrock',
     'azure_openai': 'Azure',
-  }[providerClass] || providerClass;
+  }[providerClass] || providerRaw;
+  // Show full label for bedrock variants
+  const displayLabel = providerRaw.includes('openai-compat') ? 'Bedrock (OpenAI)' : providerLabel;
 
   const statusOk = evt.status_code >= 200 && evt.status_code < 400;
   const statusClass = statusOk ? 'ok' : 'err';
@@ -416,7 +419,7 @@ function addEvent(evt) {
 
   card.innerHTML = `
     <div class="event-header">
-      <span class="provider-badge ${providerClass}">${providerLabel}</span>
+      <span class="provider-badge ${providerClass}">${displayLabel}</span>
       <span class="method-path"><span class="method">${evt.method || 'POST'}</span>${evt.path || ''}</span>
       <span class="status-code ${statusClass}">${evt.status_code || '—'}</span>
       <span class="latency">${evt.latency_ms != null ? evt.latency_ms + 'ms' : ''}</span>
