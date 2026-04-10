@@ -67,21 +67,28 @@ class AzureOpenAIProvider(Provider):
     name = "azure_openai"
     auth_header = "api-key"  # primary, but we also accept Authorization: Bearer (Entra ID)
 
-    def check_auth(self, headers: dict) -> str | None:
-        """Azure supports two auth methods: api-key header OR Authorization: Bearer (Entra ID/AAD)."""
-        has_api_key = False
-        has_bearer = False
-
+    def extract_key_value(self, headers: dict) -> str | None:
+        """Azure: extract key from api-key header or Authorization: Bearer."""
         for key, value in headers.items():
             key_lower = key.lower()
             if key_lower == "api-key":
-                has_api_key = True
-            elif key_lower == "authorization" and value.startswith("Bearer "):
-                has_bearer = True
+                return value
+            if key_lower == "authorization" and value.startswith("Bearer "):
+                return value[7:]  # strip "Bearer "
+        return None
 
-        if has_api_key or has_bearer:
-            return None
-        return "missing api-key header or Authorization: Bearer token (Entra ID)"
+    def check_auth(self, headers: dict) -> str | None:
+        """Azure supports two auth methods: api-key header OR Authorization: Bearer (Entra ID/AAD)."""
+        key_value = self.extract_key_value(headers)
+        if key_value is None:
+            return "missing api-key header or Authorization: Bearer token (Entra ID)"
+
+        if self.expected_key is not None and key_value != self.expected_key:
+            return (
+                f"invalid API key for azure_openai: "
+                f"got '{key_value}', expected '{self.expected_key}'"
+            )
+        return None
 
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/openai/deployments/{deployment_id}/chat/completions")

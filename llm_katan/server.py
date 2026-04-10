@@ -27,7 +27,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.9.0"
+    __version__ = "0.10.0"
 
 logger = logging.getLogger(__name__)
 
@@ -180,9 +180,13 @@ async def lifespan(app: FastAPI):
     # Register provider routes
     for provider_name in config.providers:
         provider_cls = get_provider(provider_name)
-        provider = provider_cls(backend=backend)
+        expected_key = config.get_expected_key(provider_name)
+        provider = provider_cls(backend=backend, expected_key=expected_key)
         provider.register_routes(app)
-        logger.info("Registered provider: %s", provider_name)
+        if expected_key:
+            logger.info("Registered provider: %s (key validation: enabled)", provider_name)
+        else:
+            logger.info("Registered provider: %s", provider_name)
 
     logger.info("Dashboard: http://%s:%d/dashboard", config.host, config.port)
     logger.info("LLM Katan ready on %s:%d", config.host, config.port)

@@ -66,14 +66,33 @@ class VertexAIProvider(Provider):
     name = "vertexai"
     auth_header = "Authorization"
 
+    def _normalize_key(self, raw_value: str) -> str:
+        """Strip 'Bearer ' prefix from Authorization header."""
+        if raw_value.startswith("Bearer "):
+            return raw_value[7:]
+        return raw_value
+
     def check_auth_with_request(self, headers: dict, query_params) -> str | None:
         """Vertex/Gemini supports Authorization: Bearer OR ?key= query parameter."""
-        # Check header first
-        if self.check_auth(headers) is None:
+        # Try header auth first
+        header_err = self.check_auth(headers)
+        if header_err is None:
             return None
+
+        # If header was present but key was wrong, don't fall through to ?key=
+        if "invalid API key" in (header_err or ""):
+            return header_err
+
         # Fall back to ?key= query param (Gemini API style)
-        if query_params.get("key"):
+        key_param = query_params.get("key")
+        if key_param:
+            if self.expected_key is not None and key_param != self.expected_key:
+                return (
+                    f"invalid API key for vertexai: "
+                    f"got '{key_param}', expected '{self.expected_key}'"
+                )
             return None
+
         return "missing Authorization header or ?key= query parameter"
 
     def register_routes(self, app: FastAPI) -> None:

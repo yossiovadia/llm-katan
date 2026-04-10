@@ -18,7 +18,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.9.0"
+    __version__ = "0.10.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +80,17 @@ logger = logging.getLogger(__name__)
     default=False,
     help="Enable HTTPS with auto-generated self-signed certificate",
 )
+@click.option(
+    "--validate-keys",
+    is_flag=True,
+    default=False,
+    help="Validate API key values (not just header presence). Uses defaults or --api-keys overrides.",
+)
+@click.option(
+    "--api-keys",
+    default="",
+    help="Override API keys per provider: openai=mykey,anthropic=mykey2 (requires --validate-keys)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -95,6 +106,8 @@ def main(
     max_concurrent: int,
     providers: str,
     tls: bool,
+    validate_keys: bool,
+    api_keys: str,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -119,6 +132,15 @@ def main(
             click.echo(f"Error: Unknown provider {p!r}. Available: {', '.join(available)}", err=True)
             sys.exit(1)
 
+    # Parse api-keys overrides
+    key_overrides = {}
+    if api_keys:
+        for pair in api_keys.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                key_overrides[k.strip()] = v.strip()
+
     config = ServerConfig(
         model_name=model,
         served_model_name=served_model_name,
@@ -132,6 +154,8 @@ def main(
         max_concurrent=max_concurrent,
         providers=provider_list,
         tls=tls,
+        validate_keys=validate_keys,
+        api_keys=key_overrides,
     )
 
     protocol = "https" if config.tls else "http"
@@ -145,6 +169,8 @@ def main(
     click.echo(f"  Providers: {', '.join(config.providers)}")
     if config.tls:
         click.echo(f"  TLS:       enabled (self-signed)")
+    if config.validate_keys:
+        click.echo(f"  Keys:      validating (use --api-keys to override defaults)")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()
 

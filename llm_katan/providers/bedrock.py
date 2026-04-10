@@ -77,13 +77,25 @@ class BedrockProvider(Provider):
     name = "bedrock"
     auth_header = "Authorization"
 
+    def _extract_sigv4_access_key(self, auth_value: str) -> str | None:
+        """Extract the access key ID from SigV4 Authorization header.
+
+        Format: AWS4-HMAC-SHA256 Credential=AKID/.../aws4_request, ...
+        """
+        try:
+            cred_part = auth_value.split("Credential=")[1].split(",")[0]
+            return cred_part.split("/")[0]
+        except (IndexError, AttributeError):
+            return None
+
     def check_auth(self, headers: dict) -> str | None:
         """Validate AWS SigV4 auth headers for Bedrock.
 
         Checks:
-        1. Authorization header exists and starts with AWS4-HMAC-SHA256
-        2. x-amz-date header is present
-        3. x-amz-security-token header (logged as warning if missing, not rejected)
+        1. Authorization header exists and starts with AWS4-HMAC-SHA256 or Bearer
+        2. x-amz-date header is present (for SigV4)
+        3. x-amz-security-token header (logged if missing, not rejected)
+        4. Key value matches expected (when validate_keys enabled)
         """
         auth_value = None
         has_amz_date = False
@@ -102,7 +114,6 @@ class BedrockProvider(Provider):
             return "missing Authorization header"
 
         if not auth_value.startswith("AWS4-HMAC-SHA256"):
-            # Also accept Bearer for backward compat with OpenAI-compatible Bedrock endpoint
             if not auth_value.startswith("Bearer "):
                 return "Authorization header must start with 'AWS4-HMAC-SHA256' or 'Bearer'"
 
@@ -111,6 +122,19 @@ class BedrockProvider(Provider):
 
         if auth_value.startswith("AWS4-HMAC-SHA256") and not has_security_token:
             logger.info("bedrock | x-amz-security-token not present (optional, only needed for temporary credentials)")
+
+        # Key validation
+        if self.expected_key is not None:
+            if auth_value.startswith("AWS4-HMAC-SHA256"):
+                actual = self._extract_sigv4_access_key(auth_value)
+            else:
+                actual = auth_value[7:]  # strip "Bearer "
+
+            if actual != self.expected_key:
+                return (
+                    f"invalid API key for bedrock: "
+                    f"got '{actual}', expected '{self.expected_key}'"
+                )
 
         return None
 

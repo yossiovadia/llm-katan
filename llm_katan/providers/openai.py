@@ -35,6 +35,12 @@ class OpenAIProvider(Provider):
     name = "openai"
     auth_header = "Authorization"
 
+    def _normalize_key(self, raw_value: str) -> str:
+        """Strip 'Bearer ' prefix from Authorization header."""
+        if raw_value.startswith("Bearer "):
+            return raw_value[7:]
+        return raw_value
+
     def register_routes(self, app: FastAPI) -> None:
         @app.post("/v1/chat/completions")
         async def chat_completions(raw_request: Request):
