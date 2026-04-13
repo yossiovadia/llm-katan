@@ -4,13 +4,15 @@ Google Vertex AI / Gemini API provider for llm-katan.
 Implements the Gemini generateContent API per the official spec at
 ai.google.dev/api/generate-content.
 
-Supports both the Gemini API URL format:
-  POST /v1beta/models/{model}:generateContent
-  POST /v1beta/models/{model}:streamGenerateContent
+Supports:
+  Native Gemini:
+    POST /v1beta/models/{model}:generateContent
+    POST /v1beta/models/{model}:streamGenerateContent
+    POST /v1/models/{model}:generateContent
+    POST /v1/models/{model}:streamGenerateContent
 
-And the Vertex AI URL format:
-  POST /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
-  POST /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:streamGenerateContent
+  OpenAI-compatible (Vertex AI):
+    POST /v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions
 
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
@@ -96,7 +98,7 @@ class VertexAIProvider(Provider):
         return "missing Authorization header or ?key= query parameter"
 
     def register_routes(self, app: FastAPI) -> None:
-        # Gemini API format: /v1beta/models/{model}:generateContent
+        # Native Gemini API: /v1beta/models/{model}:generateContent
         @app.post("/v1beta/models/{model}:generateContent")
         async def generate_content(model: str, raw_request: Request):
             return await self._handle_request(model, raw_request, app, stream=False)
@@ -105,7 +107,6 @@ class VertexAIProvider(Provider):
         async def stream_generate_content(model: str, raw_request: Request):
             return await self._handle_request(model, raw_request, app, stream=True)
 
-        # Also support /v1/ prefix (non-beta)
         @app.post("/v1/models/{model}:generateContent")
         async def generate_content_v1(model: str, raw_request: Request):
             return await self._handle_request(model, raw_request, app, stream=False)
@@ -113,6 +114,11 @@ class VertexAIProvider(Provider):
         @app.post("/v1/models/{model}:streamGenerateContent")
         async def stream_generate_content_v1(model: str, raw_request: Request):
             return await self._handle_request(model, raw_request, app, stream=True)
+
+        # OpenAI-compatible Vertex AI endpoint
+        @app.post("/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions")
+        async def vertex_openai_compat(project: str, location: str, endpoint: str, raw_request: Request):
+            return await self._handle_openai_compat(endpoint, raw_request, app)
 
     async def _handle_request(self, model: str, raw_request: Request, app: FastAPI, stream: bool):
         client_ip = raw_request.client.host if raw_request.client else "unknown"
@@ -189,6 +195,78 @@ class VertexAIProvider(Provider):
 
         resp_body = self._full_response(model_name, generated_text, prompt_tokens, completion_tokens)
         return resp_body
+
+    async def _handle_openai_compat(self, endpoint: str, raw_request: Request, app):
+        """Handle OpenAI-compatible Vertex AI endpoint. Same format as OpenAI."""
+        client_ip = raw_request.client.host if raw_request.client else "unknown"
+
+        auth_err = self.check_auth_with_request(dict(raw_request.headers), raw_request.query_params)
+        if auth_err:
+            logger.warning("vertexai openai-compat | %s | 401 | %s", client_ip, auth_err)
+            return _gemini_error(401, auth_err)
+
+        try:
+            body = await raw_request.json()
+        except Exception:
+            return _gemini_error(400, "Invalid JSON in request body")
+
+        messages_raw = body.get("messages")
+        if not messages_raw or not isinstance(messages_raw, list):
+            return _gemini_error(400, "messages: field required")
+
+        model_name = body.get("model", endpoint)
+        max_tokens = body.get("max_tokens", self.backend.config.max_tokens)
+        temperature = body.get("temperature", self.backend.config.temperature)
+        stream = body.get("stream", False)
+
+        logger.info(
+            "vertexai openai-compat | %s | model=%s messages=%d stream=%s",
+            client_ip, model_name, len(messages_raw), stream,
+        )
+
+        metrics = app.state.metrics
+        start_time = time.time()
+
+        backend_messages = []
+        for msg in messages_raw:
+            if isinstance(msg, dict):
+                backend_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+
+        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+            backend_messages, max_tokens, temperature
+        )
+
+        response_id = f"chatcmpl-{int(time.time() * 1000)}"
+        created = int(time.time())
+
+        if stream:
+            async def stream_response():
+                chunk_size = 4
+                for i in range(0, len(generated_text), chunk_size):
+                    chunk = {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model_name,
+                             "choices": [{"index": 0, "delta": {"content": generated_text[i:i+chunk_size]}, "finish_reason": None}]}
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                final = {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model_name,
+                         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                         "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens}}
+                yield f"data: {json.dumps(final)}\n\n"
+                yield "data: [DONE]\n\n"
+                elapsed = time.time() - start_time
+                metrics.record(elapsed, prompt_tokens, completion_tokens)
+                logger.info("vertexai openai-compat | %s | 200 | stream | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
+
+            return StreamingResponse(stream_response(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+
+        elapsed = time.time() - start_time
+        metrics.record(elapsed, prompt_tokens, completion_tokens)
+        logger.info("vertexai openai-compat | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
+
+        return {
+            "id": response_id, "object": "chat.completion", "created": created, "model": model_name,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": generated_text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
+        }
 
     @staticmethod
     def _full_response(model, text, prompt_tokens, completion_tokens):

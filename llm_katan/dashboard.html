@@ -399,7 +399,7 @@ function addEvent(evt) {
   card.className = 'event';
 
   const providerRaw = evt.provider || 'unknown';
-  const providerClass = providerRaw.startsWith('bedrock') ? 'bedrock' : providerRaw.replace(/[^a-z_]/g, '');
+  const providerClass = providerRaw.startsWith('bedrock') ? 'bedrock' : providerRaw.startsWith('vertexai') ? 'vertexai' : providerRaw.replace(/[^a-z_]/g, '');
   const providerLabel = {
     'openai': 'OpenAI',
     'anthropic': 'Anthropic',
@@ -407,8 +407,10 @@ function addEvent(evt) {
     'bedrock': 'Bedrock',
     'azure_openai': 'Azure',
   }[providerClass] || providerRaw;
-  // Show full label for bedrock variants
-  const displayLabel = providerRaw.includes('openai-compat') ? 'Bedrock (OpenAI)' : providerLabel;
+  // Show full label for openai-compat variants
+  const displayLabel = providerRaw === 'bedrock (openai-compat)' ? 'Bedrock (OpenAI)'
+    : providerRaw === 'vertexai (openai-compat)' ? 'Vertex (OpenAI)'
+    : providerLabel;
 
   const statusOk = evt.status_code >= 200 && evt.status_code < 400;
   const statusClass = statusOk ? 'ok' : 'err';

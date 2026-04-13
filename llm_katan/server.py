@@ -27,7 +27,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.10.0"
+    __version__ = "0.11.0"
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +84,10 @@ def _detect_provider(path: str, headers: dict | None = None) -> str | None:
     if path.startswith("/model/"):
         if "/converse" in path or "/invoke" in path:
             return "bedrock"
-    if path.startswith("/openai/deployments/"):
+    if path.startswith("/openai/deployments/") or path.startswith("/openai/v1/"):
         return "azure_openai"
+    if path.startswith("/v1/projects/") and "/chat/completions" in path:
+        return "vertexai (openai-compat)"
     return None
 
 
