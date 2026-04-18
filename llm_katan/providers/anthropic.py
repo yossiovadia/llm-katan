@@ -125,6 +125,9 @@ class AnthropicProvider(Provider):
             if "messages" not in body or not isinstance(body.get("messages"), list):
                 logger.warning("anthropic | %s | 400 | missing messages", client_ip)
                 return _anthropic_error(400, "messages: field required")
+            if len(body["messages"]) == 0:
+                logger.warning("anthropic | %s | 400 | empty messages", client_ip)
+                return _anthropic_error(400, "messages: at least one message is required")
 
             try:
                 request = AnthropicMessagesRequest(**body)

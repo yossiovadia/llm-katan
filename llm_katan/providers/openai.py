@@ -10,7 +10,7 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import register_provider
 from .base import Provider
@@ -25,7 +25,7 @@ class ChatMessage(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1)
     max_tokens: int | None = None
     temperature: float | None = None
     stream: bool | None = False

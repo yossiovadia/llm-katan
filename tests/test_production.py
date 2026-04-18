@@ -341,8 +341,7 @@ class TestErrorHandling:
             "/v1/chat/completions",
             json={"model": "gpt-test", "messages": []},
         )
-        # Empty messages should still work (backend handles it)
-        assert resp.status_code == 200
+        assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_invalid_json(self, client):

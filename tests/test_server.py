@@ -142,3 +142,13 @@ async def test_missing_messages(client):
     resp = await client.post("/v1/chat/completions", json={"model": "gpt-test"}, headers=openai_headers())
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "invalid_request_error"
+
+
+@pytest.mark.asyncio
+async def test_empty_messages_rejected(client):
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-test", "messages": []},
+        headers=openai_headers(),
+    )
+    assert resp.status_code == 400
