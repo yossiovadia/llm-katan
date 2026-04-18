@@ -177,9 +177,9 @@ def main(
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
     if config.tls:
-        click.echo(f"  TLS:       enabled (self-signed)")
+        click.echo("  TLS:       enabled (self-signed)")
     if config.validate_keys:
-        click.echo(f"  Keys:      validating (use --api-keys to override defaults)")
+        click.echo("  Keys:      validating (use --api-keys to override defaults)")
     click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()

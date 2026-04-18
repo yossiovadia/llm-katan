@@ -225,7 +225,11 @@ class TestBedrockKeyValidation:
             "/model/test/converse",
             json={"messages": [{"role": "user", "content": [{"text": "hi"}]}]},
             headers={
-                "Authorization": f"AWS4-HMAC-SHA256 Credential={DEFAULT_API_KEYS['bedrock']}/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc",
+                "Authorization": (
+                    f"AWS4-HMAC-SHA256 Credential={DEFAULT_API_KEYS['bedrock']}"
+                    "/20260326/us-east-1/bedrock/aws4_request,"
+                    " SignedHeaders=host;x-amz-date, Signature=abc"
+                ),
                 "x-amz-date": "20260326T120000Z",
             },
         )
@@ -246,7 +250,11 @@ class TestBedrockKeyValidation:
             "/model/test/converse",
             json={"messages": [{"role": "user", "content": [{"text": "hi"}]}]},
             headers={
-                "Authorization": "AWS4-HMAC-SHA256 Credential=WRONG_KEY/20260326/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-date, Signature=abc",
+                "Authorization": (
+                    "AWS4-HMAC-SHA256 Credential=WRONG_KEY"
+                    "/20260326/us-east-1/bedrock/aws4_request,"
+                    " SignedHeaders=host;x-amz-date, Signature=abc"
+                ),
                 "x-amz-date": "20260326T120000Z",
             },
         )

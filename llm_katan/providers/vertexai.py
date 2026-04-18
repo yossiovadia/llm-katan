@@ -24,8 +24,6 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from llm_katan.model import ModelBackend
-
 from . import register_provider
 from .base import Provider
 
@@ -246,14 +244,24 @@ class VertexAIProvider(Provider):
                     chunk = {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model_name,
                              "choices": [{"index": 0, "delta": {"content": generated_text[i:i+chunk_size]}, "finish_reason": None}]}
                     yield f"data: {json.dumps(chunk)}\n\n"
-                final = {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model_name,
-                         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                         "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens}}
+                final = {
+                    "id": response_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "usage": {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens,
+                    },
+                }
                 yield f"data: {json.dumps(final)}\n\n"
                 yield "data: [DONE]\n\n"
                 elapsed = time.time() - start_time
                 metrics.record(elapsed, prompt_tokens, completion_tokens)
-                logger.info("vertexai openai-compat | %s | 200 | stream | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
+                logger.info(
+                    "vertexai openai-compat | %s | 200 | stream | %d tokens | %.3fs",
+                    client_ip, prompt_tokens + completion_tokens, elapsed,
+                )
 
             return StreamingResponse(stream_response(), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
@@ -265,7 +273,11 @@ class VertexAIProvider(Provider):
         return {
             "id": response_id, "object": "chat.completion", "created": created, "model": model_name,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": generated_text}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
         }
 
     @staticmethod

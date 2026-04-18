@@ -112,7 +112,7 @@ async def test_chat_completion_streaming(client):
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers["content-type"]
     lines = resp.text.strip().split("\n")
-    data_lines = [l for l in lines if l.startswith("data: ")]
+    data_lines = [line for line in lines if line.startswith("data: ")]
     assert data_lines[-1] == "data: [DONE]"
 
 

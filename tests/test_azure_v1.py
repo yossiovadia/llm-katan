@@ -4,7 +4,6 @@ Covers the new Azure AI Foundry v1 path format alongside the legacy
 /openai/deployments/{id}/ path.
 """
 
-import json
 
 import pytest
 import pytest_asyncio
@@ -109,7 +108,7 @@ class TestV1Endpoint:
             headers=azure_headers(),
         )
         assert "text/event-stream" in resp.headers["content-type"]
-        lines = [l.strip() for l in resp.text.strip().split("\n") if l.strip()]
+        lines = [line.strip() for line in resp.text.strip().split("\n") if line.strip()]
         assert lines[-1] == "data: [DONE]"
 
     @pytest.mark.asyncio

@@ -27,8 +27,6 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from llm_katan.model import ModelBackend
-
 from . import register_provider
 from .base import Provider
 
@@ -263,7 +261,17 @@ class BedrockProvider(Provider):
 
         # metadata (final event)
         elapsed = time.time() - start_time
-        yield f"data: {json.dumps({'metadata': {'usage': {'inputTokens': input_tokens, 'outputTokens': output_tokens, 'totalTokens': input_tokens + output_tokens}, 'metrics': {'latencyMs': int(elapsed * 1000)}}})}\n\n"
+        metadata = {
+            'metadata': {
+                'usage': {
+                    'inputTokens': input_tokens,
+                    'outputTokens': output_tokens,
+                    'totalTokens': input_tokens + output_tokens,
+                },
+                'metrics': {'latencyMs': int(elapsed * 1000)},
+            }
+        }
+        yield f"data: {json.dumps(metadata)}\n\n"
 
         metrics.record(elapsed, input_tokens, output_tokens)
         logger.info("bedrock converse | %s | 200 | stream | %d tokens | %.3fs", client_ip, input_tokens + output_tokens, elapsed)

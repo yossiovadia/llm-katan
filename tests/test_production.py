@@ -185,7 +185,7 @@ class TestStreaming:
             "/v1/chat/completions",
             json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}], "stream": True},
         )
-        lines = [l.strip() for l in resp.text.strip().split("\n") if l.strip()]
+        lines = [line.strip() for line in resp.text.strip().split("\n") if line.strip()]
         assert lines[-1] == "data: [DONE]"
 
     @pytest.mark.asyncio
@@ -194,7 +194,10 @@ class TestStreaming:
             "/v1/chat/completions",
             json={"model": "gpt-test", "messages": [{"role": "user", "content": "hi"}], "stream": True},
         )
-        data_lines = [l for l in resp.text.strip().split("\n") if l.strip().startswith("data: ") and l.strip() != "data: [DONE]"]
+        data_lines = [
+            line for line in resp.text.strip().split("\n")
+            if line.strip().startswith("data: ") and line.strip() != "data: [DONE]"
+        ]
         last_chunk = json.loads(data_lines[-1].strip().removeprefix("data: "))
         assert last_chunk["choices"][0]["finish_reason"] == "stop"
         assert "usage" in last_chunk

@@ -7,11 +7,9 @@ connected WebSocket clients.
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
 
-import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator
 
 from fastapi import WebSocket
 

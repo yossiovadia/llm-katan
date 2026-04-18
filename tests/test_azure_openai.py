@@ -230,7 +230,7 @@ class TestStreaming:
     @pytest.mark.asyncio
     async def test_stream_ends_with_done(self, client):
         resp = await client.post(ENDPOINT, json=base_request(stream=True), headers=azure_headers())
-        lines = [l.strip() for l in resp.text.strip().split("\n") if l.strip()]
+        lines = [line.strip() for line in resp.text.strip().split("\n") if line.strip()]
         assert lines[-1] == "data: [DONE]"
 
     @pytest.mark.asyncio

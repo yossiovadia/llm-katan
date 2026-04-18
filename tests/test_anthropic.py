@@ -4,7 +4,6 @@ Tests are based on the official Anthropic API spec at
 platform.claude.com/docs/en/api/messages.
 """
 
-import asyncio
 import json
 
 import pytest

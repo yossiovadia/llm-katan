@@ -16,8 +16,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from llm_katan.model import ModelBackend
-
 from . import register_provider
 from .base import Provider
 
@@ -203,10 +201,16 @@ class AnthropicProvider(Provider):
     @staticmethod
     async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown"):
         # message_start
-        yield (
-            f"event: message_start\n"
-            f"data: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': input_tokens, 'output_tokens': 0}}})}\n\n"
-        )
+        msg_start = {
+            'type': 'message_start',
+            'message': {
+                'id': msg_id, 'type': 'message', 'role': 'assistant',
+                'content': [], 'model': model,
+                'stop_reason': None, 'stop_sequence': None,
+                'usage': {'input_tokens': input_tokens, 'output_tokens': 0},
+            },
+        }
+        yield f"event: message_start\ndata: {json.dumps(msg_start)}\n\n"
 
         # content_block_start
         yield (
@@ -230,10 +234,12 @@ class AnthropicProvider(Provider):
         )
 
         # message_delta
-        yield (
-            f"event: message_delta\n"
-            f"data: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': output_tokens}})}\n\n"
-        )
+        msg_delta = {
+            'type': 'message_delta',
+            'delta': {'stop_reason': 'end_turn', 'stop_sequence': None},
+            'usage': {'output_tokens': output_tokens},
+        }
+        yield f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n"
 
         # message_stop
         yield (
