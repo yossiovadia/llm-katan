@@ -145,6 +145,70 @@
     border-color: var(--accent-green);
   }
 
+  /* ── Stats Bar ── */
+  .stats-bar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-size: 12px;
+  }
+
+  .stats-bar .stats-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .stats-bar .stats-total {
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  .stats-bar .stats-total-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .stats-bar .stats-providers {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+  }
+
+  .stats-bar .stats-provider {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stats-bar .stats-provider-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+
+  .stats-bar .stats-provider-dot.openai { background: var(--openai); }
+  .stats-bar .stats-provider-dot.anthropic { background: var(--anthropic); }
+  .stats-bar .stats-provider-dot.vertexai { background: var(--vertexai); }
+  .stats-bar .stats-provider-dot.bedrock { background: var(--bedrock); }
+  .stats-bar .stats-provider-dot.azure_openai { background: var(--azure); }
+
+  .stats-bar .stats-provider-count {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .stats-bar .stats-provider-name {
+    color: var(--text-secondary);
+  }
+
   /* ── Events Container ── */
   .events {
     padding: 20px 32px;
@@ -346,6 +410,12 @@
   </div>
 </div>
 
+<div class="stats-bar" id="statsBar">
+  <span class="stats-label">Lifetime</span>
+  <span><span class="stats-total" id="statsTotal">—</span><span class="stats-total-label">requests</span></span>
+  <div class="stats-providers" id="statsProviders"></div>
+</div>
+
 <div class="events" id="events">
   <div class="empty-state" id="emptyState">
     <div class="big">&#x2302;</div>
@@ -505,6 +575,43 @@ function clearEvents() {
   eventCount = 0;
   document.getElementById('eventCount').textContent = '0';
 }
+
+const PROVIDER_NAMES = {
+  'openai': 'OpenAI',
+  'anthropic': 'Anthropic',
+  'vertexai': 'Vertex AI',
+  'bedrock': 'Bedrock',
+  'azure_openai': 'Azure',
+};
+
+function providerClass(name) {
+  if (name.startsWith('bedrock')) return 'bedrock';
+  if (name.startsWith('vertexai')) return 'vertexai';
+  return name.replace(/[^a-z_]/g, '');
+}
+
+async function fetchStats() {
+  try {
+    const resp = await fetch('/stats');
+    const data = await resp.json();
+    document.getElementById('statsTotal').textContent = data.total.toLocaleString();
+    const container = document.getElementById('statsProviders');
+    container.innerHTML = '';
+    for (const [name, count] of Object.entries(data.providers)) {
+      const cls = providerClass(name);
+      const label = PROVIDER_NAMES[cls] || name;
+      container.innerHTML += `
+        <div class="stats-provider">
+          <div class="stats-provider-dot ${cls}"></div>
+          <span class="stats-provider-count">${count.toLocaleString()}</span>
+          <span class="stats-provider-name">${label}</span>
+        </div>`;
+    }
+  } catch(e) {}
+}
+
+fetchStats();
+setInterval(fetchStats, 5000);
 
 connect();
 </script>

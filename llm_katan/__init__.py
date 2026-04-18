@@ -11,7 +11,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.12.1"
+    __version__ = "0.12.2"
 
 __author__ = "Yossi Ovadia"
 __email__ = "yovadia@redhat.com"
