@@ -11,6 +11,7 @@ from llm_katan.config import ServerConfig
 from llm_katan.model import ModelBackend
 from llm_katan.providers.openai import OpenAIProvider
 from llm_katan.server import ServerMetrics, create_app
+from llm_katan.stats import PersistentStats
 
 
 class MockBackend(ModelBackend):
@@ -57,6 +58,7 @@ def make_app(max_concurrent=1, latency=0):
     backend = MockBackend(config, latency=latency)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
+    app.state.stats = PersistentStats()
 
     provider = OpenAIProvider(backend=backend)
     provider.register_routes(app)

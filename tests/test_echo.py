@@ -11,6 +11,7 @@ from llm_katan.model import EchoBackend
 from llm_katan.providers.anthropic import AnthropicProvider
 from llm_katan.providers.openai import OpenAIProvider
 from llm_katan.server import ServerMetrics, create_app
+from llm_katan.stats import PersistentStats
 
 
 def make_app(providers=None):
@@ -26,6 +27,7 @@ def make_app(providers=None):
     backend = EchoBackend(config)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
+    app.state.stats = PersistentStats()
 
     for p in providers:
         if p == "openai":

@@ -21,13 +21,14 @@ from .config import ServerConfig
 from .events import broadcaster, make_event
 from .model import create_backend
 from .providers import get_provider
+from .stats import PersistentStats
 
 try:
     from importlib.metadata import PackageNotFoundError, version
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.11.0"
+    __version__ = "0.12.0"
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def _detect_provider(path: str, headers: dict | None = None) -> str | None:
 class DashboardMiddleware(BaseHTTPMiddleware):
     """Captures request/response for every provider endpoint and broadcasts to dashboard."""
 
-    _SKIP = {"/", "/health", "/metrics", "/dashboard", "/docs", "/redoc", "/openapi.json", "/ws/events"}
+    _SKIP = {"/", "/health", "/metrics", "/stats", "/dashboard", "/docs", "/redoc", "/openapi.json", "/ws/events"}
 
     async def dispatch(self, request, call_next):
         path = request.url.path
@@ -163,6 +164,10 @@ class DashboardMiddleware(BaseHTTPMiddleware):
         )
         await broadcaster.broadcast(event)
 
+        stats = getattr(request.app.state, "stats", None)
+        if stats:
+            stats.record(provider)
+
         return new_response
 
 
@@ -178,6 +183,9 @@ async def lifespan(app: FastAPI):
 
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
+    app.state.stats = PersistentStats(config.stats_file)
+    if config.stats_file:
+        logger.info("Persistent stats: %s (%d total)", config.stats_file, app.state.stats.total)
 
     # Register provider routes
     for provider_name in config.providers:
@@ -244,7 +252,24 @@ def create_app(config: ServerConfig) -> FastAPI:
             f'# TYPE llm_katan_uptime_seconds gauge\n'
             f'llm_katan_uptime_seconds{{model="{config.served_model_name}"}} {uptime:.2f}\n'
         )
+        stats: PersistentStats = app.state.stats
+        stats_data = stats.get()
+        text += (
+            f'\n# HELP llm_katan_lifetime_requests_total Total requests across all sessions\n'
+            f'# TYPE llm_katan_lifetime_requests_total counter\n'
+            f'llm_katan_lifetime_requests_total {stats_data["total"]}\n'
+        )
+        for prov, count in stats_data["providers"].items():
+            text += (
+                f'llm_katan_lifetime_provider_requests_total{{provider="{prov}"}} {count}\n'
+            )
+
         return PlainTextResponse(content=text, media_type="text/plain")
+
+    @app.get("/stats")
+    async def get_stats():
+        stats: PersistentStats = app.state.stats
+        return stats.get()
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():

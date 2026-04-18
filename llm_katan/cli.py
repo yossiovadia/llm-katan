@@ -7,6 +7,7 @@ Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 import click
 
@@ -18,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.11.0"
+    __version__ = "0.12.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,6 +92,12 @@ logger = logging.getLogger(__name__)
     default="",
     help="Override API keys per provider: openai=mykey,anthropic=mykey2 (requires --validate-keys)",
 )
+@click.option(
+    "--stats-file",
+    default=str(Path.home() / ".llm-katan" / "stats.json"),
+    show_default=True,
+    help="Path to persistent stats file (tracks total requests across restarts)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -108,6 +115,7 @@ def main(
     tls: bool,
     validate_keys: bool,
     api_keys: str,
+    stats_file: str,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -156,6 +164,7 @@ def main(
         tls=tls,
         validate_keys=validate_keys,
         api_keys=key_overrides,
+        stats_file=stats_file,
     )
 
     protocol = "https" if config.tls else "http"
@@ -171,6 +180,7 @@ def main(
         click.echo(f"  TLS:       enabled (self-signed)")
     if config.validate_keys:
         click.echo(f"  Keys:      validating (use --api-keys to override defaults)")
+    click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()
 

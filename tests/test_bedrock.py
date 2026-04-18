@@ -18,6 +18,7 @@ from llm_katan.config import ServerConfig
 from llm_katan.model import ModelBackend
 from llm_katan.providers.bedrock import BedrockProvider
 from llm_katan.server import ServerMetrics, create_app
+from llm_katan.stats import PersistentStats
 
 
 class MockBackend(ModelBackend):
@@ -45,6 +46,7 @@ def make_app():
     backend = MockBackend(config)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
+    app.state.stats = PersistentStats()
     provider = BedrockProvider(backend=backend)
     provider.register_routes(app)
     return app

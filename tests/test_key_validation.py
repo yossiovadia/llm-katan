@@ -21,6 +21,7 @@ from llm_katan.providers.bedrock import BedrockProvider
 from llm_katan.providers.openai import OpenAIProvider
 from llm_katan.providers.vertexai import VertexAIProvider
 from llm_katan.server import ServerMetrics, create_app
+from llm_katan.stats import PersistentStats
 
 
 class MockBackend(ModelBackend):
@@ -44,6 +45,7 @@ def make_app(providers, validate_keys=True, api_keys=None):
     backend = MockBackend(config)
     app.state.backend = backend
     app.state.metrics = ServerMetrics()
+    app.state.stats = PersistentStats()
 
     provider_map = {
         "openai": OpenAIProvider,
