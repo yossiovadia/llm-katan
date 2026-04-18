@@ -82,6 +82,16 @@ logger = logging.getLogger(__name__)
     help="Enable HTTPS with auto-generated self-signed certificate",
 )
 @click.option(
+    "--tls-cert",
+    default="",
+    help="Path to TLS certificate file (PEM). Enables HTTPS with custom cert (use with --tls-key).",
+)
+@click.option(
+    "--tls-key",
+    default="",
+    help="Path to TLS private key file (PEM). Requires --tls-cert.",
+)
+@click.option(
     "--validate-keys",
     is_flag=True,
     default=False,
@@ -113,6 +123,8 @@ def main(
     max_concurrent: int,
     providers: str,
     tls: bool,
+    tls_cert: str,
+    tls_key: str,
     validate_keys: bool,
     api_keys: str,
     stats_file: str,
@@ -149,6 +161,13 @@ def main(
                 k, v = pair.split("=", 1)
                 key_overrides[k.strip()] = v.strip()
 
+    # --tls-cert/--tls-key implies TLS
+    if tls_cert or tls_key:
+        if not (tls_cert and tls_key):
+            click.echo("Error: --tls-cert and --tls-key must be used together", err=True)
+            sys.exit(1)
+        tls = True
+
     config = ServerConfig(
         model_name=model,
         served_model_name=served_model_name,
@@ -162,6 +181,8 @@ def main(
         max_concurrent=max_concurrent,
         providers=provider_list,
         tls=tls,
+        tls_cert=tls_cert or None,
+        tls_key=tls_key or None,
         validate_keys=validate_keys,
         api_keys=key_overrides,
         stats_file=stats_file,
@@ -177,7 +198,10 @@ def main(
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
     if config.tls:
-        click.echo("  TLS:       enabled (self-signed)")
+        if config.tls_cert:
+            click.echo(f"  TLS:       enabled ({config.tls_cert})")
+        else:
+            click.echo("  TLS:       enabled (self-signed)")
     if config.validate_keys:
         click.echo("  Keys:      validating (use --api-keys to override defaults)")
     click.echo(f"  Stats:     {config.stats_file}")

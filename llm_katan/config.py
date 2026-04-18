@@ -34,6 +34,8 @@ class ServerConfig:
     max_concurrent: int = 1
     providers: list[str] = field(default_factory=lambda: ["openai"])
     tls: bool = False
+    tls_cert: str | None = None
+    tls_key: str | None = None
     validate_keys: bool = False
     api_keys: dict[str, str] = field(default_factory=dict)
     stats_file: str | None = None

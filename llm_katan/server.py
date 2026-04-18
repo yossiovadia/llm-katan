@@ -357,9 +357,13 @@ async def run_server(config: ServerConfig):
 
     ssl_kwargs = {}
     if config.tls:
-        certfile, keyfile = _generate_self_signed_cert()
-        ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
-        logger.info("TLS enabled (self-signed certificate)")
+        if config.tls_cert and config.tls_key:
+            ssl_kwargs = {"ssl_certfile": config.tls_cert, "ssl_keyfile": config.tls_key}
+            logger.info("TLS enabled (cert: %s)", config.tls_cert)
+        else:
+            certfile, keyfile = _generate_self_signed_cert()
+            ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
+            logger.info("TLS enabled (self-signed certificate)")
 
     protocol = "https" if config.tls else "http"
     logger.info("Server URL: %s://%s:%d", protocol, config.host, config.port)
