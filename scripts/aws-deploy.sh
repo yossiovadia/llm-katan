@@ -3,7 +3,7 @@
 #
 # Deploys llm-katan on Amazon Linux 2023 (t3a.micro) with:
 #   - HTTP on port 8000 (direct)
-#   - HTTPS on port 443 (Caddy + Let's Encrypt auto-cert via sslip.io)
+#   - HTTPS on port 443 (Let's Encrypt cert via certbot + sslip.io)
 #   - All 5 providers: openai, anthropic, vertexai, bedrock, azure_openai
 #   - API key validation enabled
 #
@@ -200,67 +200,51 @@ SystemMaxUse=50M
 JRNL
 systemctl restart systemd-journald
 
-echo ">>> Installing Caddy..."
-if ! command -v caddy &>/dev/null; then
-  CADDY_VER="2.9.1"
-  curl -sL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VER}/caddy_${CADDY_VER}_linux_amd64.tar.gz" \
-    | tar xz -C /usr/local/bin caddy
-  chmod +x /usr/local/bin/caddy
-  # Create caddy user and dirs
-  useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy 2>/dev/null || true
-  mkdir -p /etc/caddy /var/lib/caddy/.local/share/caddy /var/log/caddy
-  chown -R caddy:caddy /var/lib/caddy /var/log/caddy
-  # systemd unit
-  cat > /etc/systemd/system/caddy.service <<'CSVC'
-[Unit]
-Description=Caddy
-After=network.target
-
-[Service]
-User=caddy
-Group=caddy
-ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
-ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-Restart=on-failure
-RestartSec=5
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-
-[Install]
-WantedBy=multi-user.target
-CSVC
-  systemctl daemon-reload
-fi
+echo ">>> Installing certbot..."
+command -v certbot &>/dev/null || yum install -y certbot
 
 REMOTE_SCRIPT
 
-  # Caddy config with the actual FQDN
+  # Get Let's Encrypt cert and configure TLS service
   cat <<REMOTE_SCRIPT
-echo ">>> Configuring Caddy for TLS (${fqdn})..."
-cat > /etc/caddy/Caddyfile <<CADDY
-${fqdn} {
-    reverse_proxy localhost:8000
-}
-CADDY
+echo ">>> Getting Let's Encrypt certificate for ${fqdn}..."
+# Stop TLS service to free port 443 for certbot standalone mode
+systemctl stop llm-katan-tls 2>/dev/null || true
+
+certbot certonly --standalone --non-interactive --agree-tos \\
+  --register-unsafely-without-email \\
+  -d ${fqdn} 2>&1 | tail -3
+
+echo ">>> Configuring TLS service with Let's Encrypt cert..."
+cat > /etc/systemd/system/llm-katan-tls.service <<'SVC'
+[Unit]
+Description=LLM Katan TLS (port 443)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/llm-katan --model llm-katan-echo --backend echo --validate-keys --providers openai,anthropic,vertexai,bedrock,azure_openai --tls-cert /etc/letsencrypt/live/${fqdn}/fullchain.pem --tls-key /etc/letsencrypt/live/${fqdn}/privkey.pem --port 443
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+# Auto-renew cert (every day at 3am, restart service after renewal)
+echo "0 3 * * * root certbot renew --quiet --post-hook \"systemctl restart llm-katan-tls\"" > /etc/cron.d/certbot-renew
+
+systemctl daemon-reload
+systemctl enable llm-katan-tls
+systemctl restart llm-katan-tls
 
 REMOTE_SCRIPT
 
   cat <<'REMOTE_SCRIPT'
-systemctl enable caddy
-systemctl restart caddy
-
-# Wait for Caddy to get the cert (up to 60s)
-echo ">>> Waiting for Let's Encrypt certificate..."
-for i in $(seq 1 12); do
-  if curl -sf --max-time 5 https://localhost:8443/health &>/dev/null; then
-    echo "  TLS certificate obtained!"
-    break
-  fi
-  sleep 5
-done
-
+# Wait for TLS to come up
+sleep 2
 echo ">>> Setup complete!"
 echo "  HTTP:  http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8000/health"
-echo "  HTTPS: https://$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)/health"
+echo "  HTTPS: https://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 | tr '.' '-').sslip.io/health"
 REMOTE_SCRIPT
 }
 
@@ -414,62 +398,43 @@ cmd_setup_tls() {
   # Ensure port 80 is open
   ensure_security_group >/dev/null
 
-  # Generate just the Caddy setup portion
+  # Install certbot, get cert, configure llm-katan with it
   ssh $SSH_OPTS "ec2-user@$ip" "sudo bash -s" <<SETUP_TLS 2>&1 | sed 's/^/  /'
 set -euo pipefail
 
-echo ">>> Installing Caddy..."
-if ! command -v caddy &>/dev/null; then
-  CADDY_VER="2.9.1"
-  curl -sL "https://github.com/caddyserver/caddy/releases/download/v\${CADDY_VER}/caddy_\${CADDY_VER}_linux_amd64.tar.gz" \
-    | tar xz -C /usr/local/bin caddy
-  chmod +x /usr/local/bin/caddy
-  useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy 2>/dev/null || true
-  mkdir -p /etc/caddy /var/lib/caddy/.local/share/caddy /var/log/caddy
-  chown -R caddy:caddy /var/lib/caddy /var/log/caddy
-  cat > /etc/systemd/system/caddy.service <<'CSVC'
+echo ">>> Installing certbot..."
+command -v certbot &>/dev/null || yum install -y certbot 2>&1 | tail -1
+
+echo ">>> Upgrading llm-katan..."
+pip3.11 install --force-reinstall llm-katan 2>&1 | grep "Successfully installed"
+
+echo ">>> Getting Let's Encrypt certificate..."
+systemctl stop llm-katan-tls 2>/dev/null || true
+certbot certonly --standalone --non-interactive --agree-tos \
+  --register-unsafely-without-email \
+  -d ${fqdn} 2>&1 | tail -3
+
+echo ">>> Configuring TLS service..."
+cat > /etc/systemd/system/llm-katan-tls.service <<SVC
 [Unit]
-Description=Caddy
+Description=LLM Katan TLS (port 443)
 After=network.target
 
 [Service]
-User=caddy
-Group=caddy
-ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
-ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-Restart=on-failure
+ExecStart=/usr/local/bin/llm-katan --model llm-katan-echo --backend echo --validate-keys --providers openai,anthropic,vertexai,bedrock,azure_openai --tls-cert /etc/letsencrypt/live/${fqdn}/fullchain.pem --tls-key /etc/letsencrypt/live/${fqdn}/privkey.pem --port 443
+Restart=always
 RestartSec=5
-AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
-CSVC
-  systemctl daemon-reload
-fi
+SVC
 
-echo ">>> Configuring Caddy for ${fqdn}..."
-cat > /etc/caddy/Caddyfile <<'CADDY'
-${fqdn} {
-    reverse_proxy localhost:8000
-}
-CADDY
+echo "0 3 * * * root certbot renew --quiet --post-hook \"systemctl restart llm-katan-tls\"" > /etc/cron.d/certbot-renew
 
-# Stop old self-signed TLS service
-systemctl stop llm-katan-tls 2>/dev/null || true
-systemctl disable llm-katan-tls 2>/dev/null || true
-
-systemctl enable caddy
-systemctl restart caddy
-
-echo ">>> Waiting for Let's Encrypt certificate..."
-for i in \$(seq 1 12); do
-  if curl -sf --max-time 5 https://localhost:8443/health &>/dev/null; then
-    echo "  TLS certificate obtained!"
-    break
-  fi
-  sleep 5
-done
-
+systemctl daemon-reload
+systemctl enable llm-katan-tls
+systemctl restart llm-katan-tls
+sleep 2
 echo ">>> Done!"
 SETUP_TLS
 
