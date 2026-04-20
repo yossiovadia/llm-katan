@@ -145,23 +145,30 @@ class AnthropicProvider(Provider):
             start_time = time.time()
 
             # Convert Anthropic messages to backend format
-            backend_messages = []
-
-            # System prompt is top-level in Anthropic
-            system_text = _extract_system_text(request.system)
-            if system_text:
-                backend_messages.append({"role": "system", "content": system_text})
+            new_messages = []
 
             for msg in request.messages:
                 text = _extract_text_from_content(msg.content)
-                backend_messages.append({"role": msg.role, "content": text})
+                new_messages.append({"role": msg.role, "content": text})
+
+            system_text = _extract_system_text(request.system)
+            conv_id = None
+            if request.metadata and isinstance(request.metadata, dict):
+                conv_id = request.metadata.get("conversation_id")
+
+            user_text = new_messages[-1]["content"] if new_messages else ""
+            backend_messages, conv_id = await self.resolve_messages(
+                conv_id, new_messages, system_prompt=system_text,
+            )
 
             max_tokens = request.max_tokens
             temperature = request.temperature if request.temperature is not None else self.backend.config.temperature
 
-            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+            raw_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
                 backend_messages, max_tokens, temperature
             )
+            thinking, generated_text = self.split_think(raw_text)
+            await self.store_turn(conv_id, user_text, generated_text)
 
             msg_id = f"msg_{uuid.uuid4().hex[:24]}"
             model_name = self.backend.config.served_model_name
@@ -171,7 +178,7 @@ class AnthropicProvider(Provider):
                     self._stream_response(
                         msg_id, model_name, generated_text,
                         prompt_tokens, completion_tokens,
-                        metrics, start_time, client_ip,
+                        metrics, start_time, client_ip, conv_id,
                     ),
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -182,16 +189,24 @@ class AnthropicProvider(Provider):
 
             logger.info("anthropic | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-            resp_body = self._full_response(msg_id, model_name, generated_text, prompt_tokens, completion_tokens)
+            resp_body = self._full_response(
+                msg_id, model_name, generated_text, prompt_tokens,
+                completion_tokens, conv_id, thinking=thinking,
+            )
             return resp_body
 
     @staticmethod
-    def _full_response(msg_id, model, text, input_tokens, output_tokens):
-        return {
+    def _full_response(msg_id, model, text, input_tokens, output_tokens,
+                        conv_id=None, thinking=None):
+        content = []
+        if thinking:
+            content.append({"type": "thinking", "thinking": thinking})
+        content.append({"type": "text", "text": text})
+        resp = {
             "id": msg_id,
             "type": "message",
             "role": "assistant",
-            "content": [{"type": "text", "text": text}],
+            "content": content,
             "model": model,
             "stop_reason": "end_turn",
             "stop_sequence": None,
@@ -200,10 +215,12 @@ class AnthropicProvider(Provider):
                 "output_tokens": output_tokens,
             },
         }
+        if conv_id:
+            resp["metadata"] = {"conversation_id": conv_id}
+        return resp
 
     @staticmethod
-    async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown"):
-        # message_start
+    async def _stream_response(msg_id, model, text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown", conv_id=None):
         msg_start = {
             'type': 'message_start',
             'message': {
@@ -213,6 +230,8 @@ class AnthropicProvider(Provider):
                 'usage': {'input_tokens': input_tokens, 'output_tokens': 0},
             },
         }
+        if conv_id:
+            msg_start['message']['metadata'] = {'conversation_id': conv_id}
         yield f"event: message_start\ndata: {json.dumps(msg_start)}\n\n"
 
         # content_block_start

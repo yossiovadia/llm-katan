@@ -14,10 +14,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import ServerConfig
+from .conversations import ConversationStore
 from .events import broadcaster, make_event
 from .model import create_backend
 from .providers import get_provider
@@ -95,7 +96,10 @@ def _detect_provider(path: str, headers: dict | None = None) -> str | None:
 class DashboardMiddleware(BaseHTTPMiddleware):
     """Captures request/response for every provider endpoint and broadcasts to dashboard."""
 
-    _SKIP = {"/", "/health", "/metrics", "/stats", "/dashboard", "/docs", "/redoc", "/openapi.json", "/ws/events"}
+    _SKIP = {
+        "/", "/health", "/metrics", "/stats", "/dashboard", "/docs", "/redoc",
+        "/openapi.json", "/ws/events", "/conversations",
+    }
 
     async def dispatch(self, request, call_next):
         path = request.url.path
@@ -187,11 +191,27 @@ async def lifespan(app: FastAPI):
     if config.stats_file:
         logger.info("Persistent stats: %s (%d total)", config.stats_file, app.state.stats.total)
 
+    if config.enable_conversations:
+        app.state.conversations = ConversationStore(
+            ttl_seconds=config.conversation_ttl,
+            max_conversations=config.max_conversations,
+        )
+        logger.info(
+            "Conversations enabled (ttl=%ds, max=%d)",
+            config.conversation_ttl, config.max_conversations,
+        )
+    else:
+        app.state.conversations = None
+
     # Register provider routes
     for provider_name in config.providers:
         provider_cls = get_provider(provider_name)
         expected_key = config.get_expected_key(provider_name)
-        provider = provider_cls(backend=backend, expected_key=expected_key)
+        provider = provider_cls(
+            backend=backend,
+            expected_key=expected_key,
+            conversations=app.state.conversations,
+        )
         provider.register_routes(app)
         if expected_key:
             logger.info("Registered provider: %s (key validation: enabled)", provider_name)
@@ -219,12 +239,16 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {
+        resp = {
             "status": "ok",
             "model": config.served_model_name,
             "backend": config.backend,
             "providers": config.providers,
+            "conversations": config.enable_conversations,
         }
+        if config.enable_conversations:
+            resp["active_conversations"] = app.state.conversations.size
+        return resp
 
     @app.get("/metrics")
     async def get_metrics():
@@ -271,6 +295,62 @@ def create_app(config: ServerConfig) -> FastAPI:
         stats: PersistentStats = app.state.stats
         return stats.get()
 
+    @app.get("/conversations")
+    async def list_conversations():
+        store: ConversationStore | None = app.state.conversations
+        if store is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "conversations not enabled (use --enable-conversations)"},
+            )
+        convos = await store.list_conversations()
+        return {"conversations": convos, "count": len(convos)}
+
+    @app.get("/conversations/{conv_id}")
+    async def get_conversation(conv_id: str):
+        store: ConversationStore | None = app.state.conversations
+        if store is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "conversations not enabled (use --enable-conversations)"},
+            )
+        conv = await store.get(conv_id)
+        if conv is None:
+            return JSONResponse(status_code=404, content={"error": "conversation not found"})
+        return {
+            "id": conv.id,
+            "provider": conv.provider,
+            "messages": conv.messages,
+            "turn_count": conv.turn_count,
+            "created_at": conv.created_at,
+            "last_active": conv.last_active,
+            "metadata": conv.metadata,
+        }
+
+    @app.delete("/conversations/{conv_id}")
+    async def delete_conversation(conv_id: str):
+        store: ConversationStore | None = app.state.conversations
+        if store is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "conversations not enabled (use --enable-conversations)"},
+            )
+        deleted = await store.delete(conv_id)
+        if not deleted:
+            return JSONResponse(status_code=404, content={"error": "conversation not found"})
+        return {"deleted": True, "id": conv_id}
+
+    @app.delete("/conversations")
+    async def clear_conversations():
+        store: ConversationStore | None = app.state.conversations
+        if store is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "conversations not enabled (use --enable-conversations)"},
+            )
+        count = await store.clear()
+        return {"deleted": count}
+
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():
         return _DASHBOARD_HTML
@@ -292,6 +372,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             "model": config.served_model_name,
             "backend": config.backend,
             "providers": config.providers,
+            "conversations": config.enable_conversations,
             "docs": "/docs",
             "dashboard": "/dashboard",
         }
