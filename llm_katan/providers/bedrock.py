@@ -187,26 +187,32 @@ class BedrockProvider(Provider):
         start_time = time.time()
 
         # Convert Bedrock messages to backend format
-        backend_messages = []
-        system_text = _extract_system_text(body.get("system"))
-        if system_text:
-            backend_messages.append({"role": "system", "content": system_text})
+        new_messages = []
 
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", [])
             text = _extract_text_from_content(content)
-            backend_messages.append({"role": role, "content": text})
+            new_messages.append({"role": role, "content": text})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+        system_text = _extract_system_text(body.get("system"))
+        conv_id = body.get("sessionId")
+        user_text = new_messages[-1]["content"] if new_messages else ""
+        backend_messages, conv_id = await self.resolve_messages(
+            conv_id, new_messages, system_prompt=system_text,
+        )
+
+        raw_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
             backend_messages, max_tokens, temperature
         )
+        thinking, generated_text = self.split_think(raw_text)
+        await self.store_turn(conv_id, user_text, generated_text)
 
         if stream:
             return StreamingResponse(
                 self._stream_converse(
                     generated_text, prompt_tokens, completion_tokens,
-                    metrics, start_time, client_ip,
+                    metrics, start_time, client_ip, conv_id,
                 ),
                 media_type="application/vnd.amazon.eventstream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -216,16 +222,24 @@ class BedrockProvider(Provider):
         metrics.record(elapsed, prompt_tokens, completion_tokens)
         logger.info("bedrock converse | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-        resp_body = self._converse_response(generated_text, prompt_tokens, completion_tokens, elapsed)
+        resp_body = self._converse_response(
+            generated_text, prompt_tokens, completion_tokens,
+            elapsed, conv_id, thinking=thinking,
+        )
         return resp_body
 
     @staticmethod
-    def _converse_response(text, input_tokens, output_tokens, latency_ms_float):
-        return {
+    def _converse_response(text, input_tokens, output_tokens, latency_ms_float,
+                            conv_id=None, thinking=None):
+        content = []
+        if thinking:
+            content.append({"reasoningContent": {"reasoningText": {"text": thinking}}})
+        content.append({"text": text})
+        resp = {
             "output": {
                 "message": {
                     "role": "assistant",
-                    "content": [{"text": text}],
+                    "content": content,
                 }
             },
             "stopReason": "end_turn",
@@ -238,11 +252,16 @@ class BedrockProvider(Provider):
                 "latencyMs": int(latency_ms_float * 1000),
             },
         }
+        if conv_id:
+            resp["sessionId"] = conv_id
+        return resp
 
     @staticmethod
-    async def _stream_converse(text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown"):
-        # messageStart
-        yield f"data: {json.dumps({'messageStart': {'role': 'assistant'}})}\n\n"
+    async def _stream_converse(text, input_tokens, output_tokens, metrics, start_time, client_ip="unknown", conv_id=None):
+        msg_start = {'messageStart': {'role': 'assistant'}}
+        if conv_id:
+            msg_start['sessionId'] = conv_id
+        yield f"data: {json.dumps(msg_start)}\n\n"
 
         # contentBlockStart
         yield f"data: {json.dumps({'contentBlockStart': {'start': {'text': {}}, 'contentBlockIndex': 0}})}\n\n"

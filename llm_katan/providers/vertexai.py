@@ -154,26 +154,34 @@ class VertexAIProvider(Provider):
         start_time = time.time()
 
         # Convert Gemini contents to backend messages
-        backend_messages = []
-
-        # System instruction is top-level in Gemini
-        sys_instruction = body.get("systemInstruction")
-        if sys_instruction and "parts" in sys_instruction:
-            sys_text = _extract_text_from_parts(sys_instruction["parts"])
-            if sys_text:
-                backend_messages.append({"role": "system", "content": sys_text})
+        new_messages = []
 
         for content in contents:
             role = content.get("role", "user")
-            # Gemini uses "model" for assistant role
             backend_role = "assistant" if role == "model" else "user"
             parts = content.get("parts", [])
             text = _extract_text_from_parts(parts)
-            backend_messages.append({"role": backend_role, "content": text})
+            new_messages.append({"role": backend_role, "content": text})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+        sys_text = None
+        sys_instruction = body.get("systemInstruction")
+        if sys_instruction and "parts" in sys_instruction:
+            sys_text = _extract_text_from_parts(sys_instruction["parts"])
+
+        conv_id = (
+            raw_request.query_params.get("conversation_id")
+            or body.get("conversation_id")
+        )
+        user_text = new_messages[-1]["content"] if new_messages else ""
+        backend_messages, conv_id = await self.resolve_messages(
+            conv_id, new_messages, system_prompt=sys_text,
+        )
+
+        raw_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
             backend_messages, max_tokens, temperature
         )
+        generated_text = self.strip_think(raw_text)
+        await self.store_turn(conv_id, user_text, generated_text)
 
         model_name = self.backend.config.served_model_name
 
@@ -181,7 +189,7 @@ class VertexAIProvider(Provider):
             return StreamingResponse(
                 self._stream_response(
                     model_name, generated_text, prompt_tokens, completion_tokens,
-                    metrics, start_time, client_ip,
+                    metrics, start_time, client_ip, conv_id,
                 ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -191,7 +199,7 @@ class VertexAIProvider(Provider):
         metrics.record(elapsed, prompt_tokens, completion_tokens)
         logger.info("vertexai | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-        resp_body = self._full_response(model_name, generated_text, prompt_tokens, completion_tokens)
+        resp_body = self._full_response(model_name, generated_text, prompt_tokens, completion_tokens, conv_id)
         return resp_body
 
     async def _handle_openai_compat(self, endpoint: str, raw_request: Request, app):
@@ -225,14 +233,20 @@ class VertexAIProvider(Provider):
         metrics = app.state.metrics
         start_time = time.time()
 
-        backend_messages = []
+        new_messages = []
         for msg in messages_raw:
             if isinstance(msg, dict):
-                backend_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+                new_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+        conv_id = body.get("conversation_id")
+        user_text = new_messages[-1]["content"] if new_messages else ""
+        backend_messages, conv_id = await self.resolve_messages(conv_id, new_messages)
+
+        raw_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
             backend_messages, max_tokens, temperature
         )
+        generated_text = self.strip_think(raw_text)
+        await self.store_turn(conv_id, user_text, generated_text)
 
         response_id = f"chatcmpl-{int(time.time() * 1000)}"
         created = int(time.time())
@@ -281,8 +295,8 @@ class VertexAIProvider(Provider):
         }
 
     @staticmethod
-    def _full_response(model, text, prompt_tokens, completion_tokens):
-        return {
+    def _full_response(model, text, prompt_tokens, completion_tokens, conv_id=None):
+        resp = {
             "candidates": [
                 {
                     "content": {
@@ -318,9 +332,12 @@ class VertexAIProvider(Provider):
             },
             "modelVersion": model,
         }
+        if conv_id:
+            resp["conversationId"] = conv_id
+        return resp
 
     @staticmethod
-    async def _stream_response(model, text, prompt_tokens, completion_tokens, metrics, start_time, client_ip="unknown"):
+    async def _stream_response(model, text, prompt_tokens, completion_tokens, metrics, start_time, client_ip="unknown", conv_id=None):
         # Stream in chunks, each chunk is a complete GenerateContentResponse
         chunk_size = 4
         chunks = [text[i: i + chunk_size] for i in range(0, len(text), chunk_size)]
@@ -354,6 +371,8 @@ class VertexAIProvider(Provider):
                     "totalTokenCount": prompt_tokens + completion_tokens,
                 }
                 chunk_response["modelVersion"] = model
+                if conv_id:
+                    chunk_response["conversationId"] = conv_id
 
             yield f"data: {json.dumps(chunk_response)}\n\n"
 

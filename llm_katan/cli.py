@@ -108,6 +108,22 @@ logger = logging.getLogger(__name__)
     show_default=True,
     help="Path to persistent stats file (tracks total requests across restarts)",
 )
+@click.option(
+    "--enable-conversations",
+    is_flag=True,
+    default=False,
+    help="Enable multi-turn conversation memory (server-side state)",
+)
+@click.option(
+    "--conversation-ttl",
+    default=3600, type=int,
+    help="Conversation TTL in seconds (default: 3600)",
+)
+@click.option(
+    "--max-conversations",
+    default=1000, type=int,
+    help="Max concurrent conversations before LRU eviction (default: 1000)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -128,6 +144,9 @@ def main(
     validate_keys: bool,
     api_keys: str,
     stats_file: str,
+    enable_conversations: bool,
+    conversation_ttl: int,
+    max_conversations: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -186,6 +205,9 @@ def main(
         validate_keys=validate_keys,
         api_keys=key_overrides,
         stats_file=stats_file,
+        enable_conversations=enable_conversations,
+        conversation_ttl=conversation_ttl,
+        max_conversations=max_conversations,
     )
 
     protocol = "https" if config.tls else "http"
@@ -204,6 +226,10 @@ def main(
             click.echo("  TLS:       enabled (self-signed)")
     if config.validate_keys:
         click.echo("  Keys:      validating (use --api-keys to override defaults)")
+    if config.enable_conversations:
+        click.echo(
+            f"  Convos:    enabled (ttl={config.conversation_ttl}s, max={config.max_conversations})"
+        )
     click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()

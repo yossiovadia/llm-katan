@@ -39,6 +39,9 @@ class ServerConfig:
     validate_keys: bool = False
     api_keys: dict[str, str] = field(default_factory=dict)
     stats_file: str | None = None
+    enable_conversations: bool = False
+    conversation_ttl: int = 3600
+    max_conversations: int = 1000
 
     def __post_init__(self):
         if self.served_model_name is None:

@@ -81,13 +81,19 @@ class OpenAIProvider(Provider):
             metrics = app.state.metrics
             start_time = time.time()
 
-            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+            new_messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
             max_tokens = request.max_tokens if request.max_tokens is not None else self.backend.config.max_tokens
             temperature = request.temperature if request.temperature is not None else self.backend.config.temperature
 
-            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+            conv_id = body.get("conversation_id")
+            user_text = new_messages[-1]["content"] if new_messages else ""
+            messages, conv_id = await self.resolve_messages(conv_id, new_messages)
+
+            raw_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
                 messages, max_tokens, temperature
             )
+            generated_text = self.strip_think(raw_text)
+            await self.store_turn(conv_id, user_text, generated_text)
 
             response_id = f"chatcmpl-{int(time.time() * 1000)}"
             created = int(time.time())
@@ -98,9 +104,13 @@ class OpenAIProvider(Provider):
                     chunk_size = 4
                     for i in range(0, len(generated_text), chunk_size):
                         chunk_text = generated_text[i: i + chunk_size]
-                        yield f"data: {json.dumps(self._stream_chunk(response_id, created, model_name, chunk_text))}\n\n"
+                        yield f"data: {json.dumps(self._stream_chunk(response_id, created, model_name, chunk_text, conv_id))}\n\n"
 
-                    yield f"data: {json.dumps(self._final_chunk(response_id, created, model_name, prompt_tokens, completion_tokens))}\n\n"
+                    final = self._final_chunk(
+                        response_id, created, model_name,
+                        prompt_tokens, completion_tokens, conv_id,
+                    )
+                    yield f"data: {json.dumps(final)}\n\n"
                     yield "data: [DONE]\n\n"
                     elapsed = time.time() - start_time
                     metrics.record(elapsed, prompt_tokens, completion_tokens)
@@ -117,7 +127,7 @@ class OpenAIProvider(Provider):
 
             logger.info("openai | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-            resp_body = self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens)
+            resp_body = self._full_response(response_id, created, model_name, generated_text, prompt_tokens, completion_tokens, conv_id)
             return resp_body
 
         @app.get("/v1/models")
@@ -125,8 +135,8 @@ class OpenAIProvider(Provider):
             return {"object": "list", "data": [self.backend.get_model_info()]}
 
     @staticmethod
-    def _full_response(response_id, created, model, text, prompt_tokens, completion_tokens):
-        return {
+    def _full_response(response_id, created, model, text, prompt_tokens, completion_tokens, conv_id=None):
+        resp = {
             "id": response_id,
             "object": "chat.completion",
             "created": created,
@@ -145,10 +155,13 @@ class OpenAIProvider(Provider):
                 "total_tokens": prompt_tokens + completion_tokens,
             },
         }
+        if conv_id:
+            resp["conversation_id"] = conv_id
+        return resp
 
     @staticmethod
-    def _stream_chunk(response_id, created, model, text):
-        return {
+    def _stream_chunk(response_id, created, model, text, conv_id=None):
+        chunk = {
             "id": response_id,
             "object": "chat.completion.chunk",
             "created": created,
@@ -162,10 +175,13 @@ class OpenAIProvider(Provider):
                 }
             ],
         }
+        if conv_id:
+            chunk["conversation_id"] = conv_id
+        return chunk
 
     @staticmethod
-    def _final_chunk(response_id, created, model, prompt_tokens, completion_tokens):
-        return {
+    def _final_chunk(response_id, created, model, prompt_tokens, completion_tokens, conv_id=None):
+        chunk = {
             "id": response_id,
             "object": "chat.completion.chunk",
             "created": created,
@@ -184,6 +200,9 @@ class OpenAIProvider(Provider):
                 "total_tokens": prompt_tokens + completion_tokens,
             },
         }
+        if conv_id:
+            chunk["conversation_id"] = conv_id
+        return chunk
 
 
 register_provider("openai", OpenAIProvider)
