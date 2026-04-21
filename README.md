@@ -13,7 +13,8 @@ Katan means "small" in Hebrew.
 - **Streaming** — all providers support SSE streaming in their native format
 - **Live Dashboard** — real-time WebSocket-powered view of every request/response at `/dashboard`
 - **Prometheus Metrics** — request counts, token usage, latency at `/metrics`
-- **192 Tests** — extensive coverage for every provider, format, and edge case
+- **Failure Simulation** — inject errors, latency, timeouts, and rate limits for gateway resilience testing
+- **283+ Tests** — extensive coverage for every provider, format, and edge case
 
 ## Quick Start
 
@@ -142,8 +143,45 @@ Optional:
   -d, --device [auto|cpu|cuda]  Device (default: auto)
   --quantize/--no-quantize      CPU int8 quantization (default: enabled)
   --max-concurrent INTEGER      Concurrent requests (default: 1)
+  --tls                         Enable HTTPS with self-signed cert
+  --tls-cert PATH               Custom TLS certificate (use with --tls-key)
+  --tls-key PATH                Custom TLS private key
+  --validate-keys               Enforce API key validation
+  --api-keys TEXT               Override keys: openai=mykey,anthropic=mykey2
+  --stats-file PATH             Persistent stats file (default: ~/.llm-katan/stats.json)
   --log-level [debug|info|warning|error]  Log level (default: INFO)
+
+Failure Simulation (echo backend only):
+  --error-rate FLOAT            Probability (0.0-1.0) of returning HTTP 500 (default: 0.0)
+  --latency-ms INTEGER          Artificial delay per response in ms (default: 0)
+  --timeout-after INTEGER       Return 504 after N successful requests (default: 0 = disabled)
+  --rate-limit-after INTEGER    Return 429 after N requests (default: 0 = disabled)
 ```
+
+## Failure Simulation
+
+When testing AI gateways and load balancers, you need to verify they handle provider failures correctly — retries, failover, circuit breaking. These flags let you simulate real-world failure modes without touching a real provider:
+
+```bash
+# 30% of requests fail with HTTP 500
+llm-katan -m test --backend echo --error-rate 0.3 --providers openai
+
+# Every response takes 2 seconds (simulates a slow provider)
+llm-katan -m test --backend echo --latency-ms 2000 --providers openai
+
+# Works fine for 100 requests, then goes down (504)
+llm-katan -m test --backend echo --timeout-after 100 --providers openai
+
+# Works fine for 50 requests, then rate-limits (429)
+llm-katan -m test --backend echo --rate-limit-after 50 --providers openai
+
+# Combine: slow + flaky
+llm-katan -m test --backend echo --latency-ms 500 --error-rate 0.1 --providers openai
+```
+
+Errors are returned in each provider's native error format — an OpenAI 429 looks different from a Bedrock 429 or an Anthropic 429, just like the real providers. The request counter for `--timeout-after` and `--rate-limit-after` is shared across all providers on the same instance.
+
+**Example use case:** Run two llm-katan instances — one healthy, one with `--error-rate 0.3`. Point your AI gateway at both and verify it detects the degraded instance and shifts traffic to the healthy one.
 
 ## Development
 
