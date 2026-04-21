@@ -19,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.13.0"
+    __version__ = "0.14.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,6 +108,26 @@ logger = logging.getLogger(__name__)
     show_default=True,
     help="Path to persistent stats file (tracks total requests across restarts)",
 )
+@click.option(
+    "--error-rate",
+    default=0.0, type=float,
+    help="Probability (0.0-1.0) of returning HTTP 500 per request. Echo backend only. (default: 0.0)",
+)
+@click.option(
+    "--latency-ms",
+    default=0, type=int,
+    help="Artificial delay in milliseconds added to every response. Echo backend only. (default: 0)",
+)
+@click.option(
+    "--timeout-after",
+    default=0, type=int,
+    help="After N requests, return 504 for all subsequent requests. Echo backend only. (default: 0 = disabled)",
+)
+@click.option(
+    "--rate-limit-after",
+    default=0, type=int,
+    help="After N requests, return 429 for all subsequent requests. Echo backend only. (default: 0 = disabled)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -128,6 +148,10 @@ def main(
     validate_keys: bool,
     api_keys: str,
     stats_file: str,
+    error_rate: float,
+    latency_ms: int,
+    timeout_after: int,
+    rate_limit_after: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -186,6 +210,10 @@ def main(
         validate_keys=validate_keys,
         api_keys=key_overrides,
         stats_file=stats_file,
+        error_rate=error_rate,
+        latency_ms=latency_ms,
+        timeout_after=timeout_after,
+        rate_limit_after=rate_limit_after,
     )
 
     protocol = "https" if config.tls else "http"
@@ -204,6 +232,18 @@ def main(
             click.echo("  TLS:       enabled (self-signed)")
     if config.validate_keys:
         click.echo("  Keys:      validating (use --api-keys to override defaults)")
+    has_failures = config.error_rate > 0 or config.latency_ms > 0 or config.timeout_after > 0 or config.rate_limit_after > 0
+    if has_failures:
+        parts = []
+        if config.error_rate > 0:
+            parts.append(f"error_rate={config.error_rate:.0%}")
+        if config.latency_ms > 0:
+            parts.append(f"latency={config.latency_ms}ms")
+        if config.timeout_after > 0:
+            parts.append(f"timeout_after={config.timeout_after}")
+        if config.rate_limit_after > 0:
+            parts.append(f"rate_limit_after={config.rate_limit_after}")
+        click.echo(f"  Failures:  {', '.join(parts)}")
     click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()

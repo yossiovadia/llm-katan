@@ -24,6 +24,8 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from llm_katan.model import SimulatedError
+
 from . import register_provider
 from .base import Provider
 
@@ -171,9 +173,13 @@ class VertexAIProvider(Provider):
             text = _extract_text_from_parts(parts)
             backend_messages.append({"role": backend_role, "content": text})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-            backend_messages, max_tokens, temperature
-        )
+        try:
+            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+                backend_messages, max_tokens, temperature
+            )
+        except SimulatedError as e:
+            logger.warning("vertexai | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
+            return _gemini_error(e.status_code, e.message)
 
         model_name = self.backend.config.served_model_name
 
@@ -230,9 +236,13 @@ class VertexAIProvider(Provider):
             if isinstance(msg, dict):
                 backend_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-            backend_messages, max_tokens, temperature
-        )
+        try:
+            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+                backend_messages, max_tokens, temperature
+            )
+        except SimulatedError as e:
+            logger.warning("vertexai openai-compat | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
+            return _gemini_error(e.status_code, e.message)
 
         response_id = f"chatcmpl-{int(time.time() * 1000)}"
         created = int(time.time())

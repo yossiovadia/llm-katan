@@ -39,6 +39,10 @@ class ServerConfig:
     validate_keys: bool = False
     api_keys: dict[str, str] = field(default_factory=dict)
     stats_file: str | None = None
+    error_rate: float = 0.0
+    latency_ms: int = 0
+    timeout_after: int = 0
+    rate_limit_after: int = 0
 
     def __post_init__(self):
         if self.served_model_name is None:

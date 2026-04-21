@@ -16,6 +16,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from llm_katan.model import SimulatedError
+
 from . import register_provider
 from .base import Provider
 
@@ -159,9 +161,13 @@ class AnthropicProvider(Provider):
             max_tokens = request.max_tokens
             temperature = request.temperature if request.temperature is not None else self.backend.config.temperature
 
-            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-                backend_messages, max_tokens, temperature
-            )
+            try:
+                generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+                    backend_messages, max_tokens, temperature
+                )
+            except SimulatedError as e:
+                logger.warning("anthropic | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
+                return _anthropic_error(e.status_code, e.message)
 
             msg_id = f"msg_{uuid.uuid4().hex[:24]}"
             model_name = self.backend.config.served_model_name

@@ -27,6 +27,8 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from llm_katan.model import SimulatedError
+
 from . import register_provider
 from .base import Provider
 
@@ -44,6 +46,7 @@ def _bedrock_error(status_code: int, message: str) -> JSONResponse:
         429: "ThrottlingException",
         500: "InternalServerException",
         503: "ServiceUnavailableException",
+        504: "ModelTimeoutException",
     }
     return JSONResponse(
         status_code=status_code,
@@ -198,9 +201,13 @@ class BedrockProvider(Provider):
             text = _extract_text_from_content(content)
             backend_messages.append({"role": role, "content": text})
 
-        generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
-            backend_messages, max_tokens, temperature
-        )
+        try:
+            generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
+                backend_messages, max_tokens, temperature
+            )
+        except SimulatedError as e:
+            logger.warning("bedrock converse | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
+            return _bedrock_error(e.status_code, e.message)
 
         if stream:
             return StreamingResponse(
@@ -307,13 +314,17 @@ class BedrockProvider(Provider):
             return _bedrock_error(400, "Invalid JSON in request body")
 
         model_lower = model_id.lower()
-        for prefixes, method_name in self._MODEL_FAMILIES:
-            if any(model_lower.startswith(p) or p in model_lower for p in prefixes):
-                handler = getattr(self, method_name)
-                return await handler(model_id, body, app, client_ip)
+        try:
+            for prefixes, method_name in self._MODEL_FAMILIES:
+                if any(model_lower.startswith(p) or p in model_lower for p in prefixes):
+                    handler = getattr(self, method_name)
+                    return await handler(model_id, body, app, client_ip)
 
-        # Fallback: Amazon Titan format
-        return await self._invoke_titan(model_id, body, app, client_ip)
+            # Fallback: Amazon Titan format
+            return await self._invoke_titan(model_id, body, app, client_ip)
+        except SimulatedError as e:
+            logger.warning("bedrock invoke | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
+            return _bedrock_error(e.status_code, e.message)
 
     # ----------------------------------------------------------------
     # Helper: run generation and record metrics

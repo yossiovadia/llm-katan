@@ -8,12 +8,22 @@ Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 
 import asyncio
 import logging
+import random
 import time
 from abc import ABC, abstractmethod
 
 from .config import ServerConfig
 
 logger = logging.getLogger(__name__)
+
+
+class SimulatedError(Exception):
+    """Raised by EchoBackend to simulate provider failures."""
+
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(message)
 
 
 class ModelBackend(ABC):
@@ -233,6 +243,8 @@ class EchoBackend(ModelBackend):
     """Echo backend — returns request metadata without loading any model.
 
     No torch/transformers dependency. Instant startup, ~10MB memory.
+    Supports failure simulation via --error-rate, --latency-ms,
+    --timeout-after, and --rate-limit-after.
     """
 
     def __init__(self, config: ServerConfig):
@@ -240,9 +252,18 @@ class EchoBackend(ModelBackend):
         import socket
 
         self._hostname = socket.gethostname()
+        self._request_count = 0
 
     async def load_model(self) -> None:
         logger.info("Echo backend ready (no model loaded)")
+        if self.config.error_rate > 0:
+            logger.info("Failure simulation: error_rate=%.0f%%", self.config.error_rate * 100)
+        if self.config.latency_ms > 0:
+            logger.info("Failure simulation: latency=%dms", self.config.latency_ms)
+        if self.config.timeout_after > 0:
+            logger.info("Failure simulation: timeout after %d requests", self.config.timeout_after)
+        if self.config.rate_limit_after > 0:
+            logger.info("Failure simulation: rate limit after %d requests", self.config.rate_limit_after)
 
     async def _generate_text(
         self,
@@ -250,6 +271,20 @@ class EchoBackend(ModelBackend):
         max_tokens: int,
         temperature: float,
     ) -> tuple[str, int, int]:
+        self._request_count += 1
+
+        if self.config.timeout_after > 0 and self._request_count > self.config.timeout_after:
+            raise SimulatedError(504, "upstream request timeout")
+
+        if self.config.rate_limit_after > 0 and self._request_count > self.config.rate_limit_after:
+            raise SimulatedError(429, "rate limit exceeded")
+
+        if self.config.error_rate > 0 and random.random() < self.config.error_rate:
+            raise SimulatedError(500, "internal server error")
+
+        if self.config.latency_ms > 0:
+            await asyncio.sleep(self.config.latency_ms / 1000.0)
+
         from datetime import datetime, timezone
 
         user_msg = ""
