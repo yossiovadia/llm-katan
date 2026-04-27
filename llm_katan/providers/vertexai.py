@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from llm_katan.model import SimulatedError
 
 from . import register_provider
-from .base import Provider
+from .base import Provider, content_to_text, generate_dummy_args, generate_tool_call_id
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,22 @@ def _gemini_error(status_code: int, message: str) -> JSONResponse:
 
 
 def _extract_text_from_parts(parts: list) -> str:
-    """Extract text from Gemini content parts."""
+    """Extract text from Gemini content parts.
+
+    Handles text, inlineData (images), and functionCall parts.
+    """
     texts = []
     for part in parts:
-        if isinstance(part, dict) and "text" in part:
+        if not isinstance(part, dict):
+            continue
+        if "text" in part:
             texts.append(part["text"])
+        elif "inlineData" in part:
+            mime = part["inlineData"].get("mimeType", "unknown")
+            texts.append(f"[image:{mime}]")
+        elif "functionCall" in part:
+            name = part["functionCall"].get("name", "?")
+            texts.append(f"[functionCall:{name}]")
     return "\n".join(texts)
 
 
@@ -183,6 +194,25 @@ class VertexAIProvider(Provider):
 
         model_name = self.backend.config.served_model_name
 
+        # Tool calling: if tools are present, return a functionCall response
+        tools = body.get("tools")
+        if tools:
+            func_decl = None
+            for tool_obj in tools:
+                decls = tool_obj.get("functionDeclarations", [])
+                if decls:
+                    func_decl = decls[0]
+                    break
+            if func_decl:
+                elapsed = time.time() - start_time
+                metrics.record(elapsed, prompt_tokens, completion_tokens)
+                return self._tool_response(
+                    func_decl["name"],
+                    generate_dummy_args(func_decl.get("parameters")),
+                    prompt_tokens,
+                    completion_tokens,
+                )
+
         if stream:
             return StreamingResponse(
                 self._stream_response(
@@ -234,7 +264,10 @@ class VertexAIProvider(Provider):
         backend_messages = []
         for msg in messages_raw:
             if isinstance(msg, dict):
-                backend_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+                backend_messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": content_to_text(msg.get("content", "")),
+                })
 
         try:
             generated_text, prompt_tokens, completion_tokens = await self.backend.generate_text(
@@ -246,6 +279,39 @@ class VertexAIProvider(Provider):
 
         response_id = f"chatcmpl-{int(time.time() * 1000)}"
         created = int(time.time())
+
+        # Tool calling (OpenAI format)
+        if body.get("tools"):
+            tool = body["tools"][0]["function"]
+            tool_call = {
+                "id": generate_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "arguments": json.dumps(generate_dummy_args(tool.get("parameters"))),
+                },
+            }
+            elapsed = time.time() - start_time
+            metrics.record(elapsed, prompt_tokens, completion_tokens)
+            return {
+                "id": response_id, "object": "chat.completion", "created": created, "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": None, "tool_calls": [tool_call]},
+                    "logprobs": None,
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            }
+
+        # JSON mode
+        response_format = body.get("response_format")
+        if response_format and response_format.get("type") == "json_object":
+            generated_text = json.dumps({"response": generated_text})
 
         if stream:
             async def stream_response():
@@ -327,6 +393,27 @@ class VertexAIProvider(Provider):
                 "totalTokenCount": prompt_tokens + completion_tokens,
             },
             "modelVersion": model,
+        }
+
+    @staticmethod
+    def _tool_response(func_name, func_args, prompt_tokens, completion_tokens):
+        """Build a native Vertex AI / Gemini functionCall response."""
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"functionCall": {"name": func_name, "args": func_args}}],
+                        "role": "model",
+                    },
+                    "finishReason": "STOP",
+                    "index": 0,
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": prompt_tokens,
+                "candidatesTokenCount": completion_tokens,
+                "totalTokenCount": prompt_tokens + completion_tokens,
+            },
         }
 
     @staticmethod

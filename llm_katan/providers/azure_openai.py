@@ -25,14 +25,16 @@ from pydantic import BaseModel, Field
 from llm_katan.model import SimulatedError
 
 from . import register_provider
-from .base import Provider
+from .base import Provider, content_to_text, generate_dummy_args, generate_tool_call_id
 
 logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list | None = None
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -41,6 +43,9 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     stream: bool | None = False
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
+    response_format: dict | None = None
 
 
 def _azure_error(status_code: int, message: str) -> JSONResponse:
@@ -129,15 +134,16 @@ class AzureOpenAIProvider(Provider):
         api_version = raw_request.query_params.get("api-version", "v1")
 
         logger.info(
-            "azure_openai | %s | model=%s api-version=%s messages=%d stream=%s max_tokens=%s temp=%s",
+            "azure_openai | %s | model=%s api-version=%s messages=%d stream=%s tools=%s max_tokens=%s temp=%s",
             client_ip, model_name, api_version, len(request.messages),
-            request.stream, request.max_tokens, request.temperature,
+            request.stream, len(request.tools) if request.tools else 0,
+            request.max_tokens, request.temperature,
         )
 
         metrics = app.state.metrics
         start_time = time.time()
 
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        messages = [{"role": msg.role, "content": content_to_text(msg.content)} for msg in request.messages]
         max_tokens = request.max_tokens if request.max_tokens is not None else self.backend.config.max_tokens
         temperature = request.temperature if request.temperature is not None else self.backend.config.temperature
 
@@ -151,6 +157,24 @@ class AzureOpenAIProvider(Provider):
 
         response_id = f"chatcmpl-{int(time.time() * 1000)}"
         created = int(time.time())
+        use_json = request.response_format and request.response_format.get("type") == "json_object"
+
+        if request.tools:
+            tool = request.tools[0]["function"]
+            tool_call = {
+                "id": generate_tool_call_id(),
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "arguments": json.dumps(generate_dummy_args(tool.get("parameters"))),
+                },
+            }
+            elapsed = time.time() - start_time
+            metrics.record(elapsed, prompt_tokens, completion_tokens)
+            return self._tool_response(response_id, created, model_name, tool_call, prompt_tokens, completion_tokens)
+
+        if use_json:
+            generated_text = json.dumps({"response": generated_text})
 
         if request.stream:
             async def stream_response():
@@ -189,6 +213,48 @@ class AzureOpenAIProvider(Provider):
                     "index": 0,
                     "message": {"role": "assistant", "content": text},
                     "finish_reason": "stop",
+                    "content_filter_results": {
+                        "hate": {"filtered": False, "severity": "safe"},
+                        "self_harm": {"filtered": False, "severity": "safe"},
+                        "sexual": {"filtered": False, "severity": "safe"},
+                        "violence": {"filtered": False, "severity": "safe"},
+                    },
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            "prompt_filter_results": [
+                {
+                    "prompt_index": 0,
+                    "content_filter_results": {
+                        "hate": {"filtered": False, "severity": "safe"},
+                        "self_harm": {"filtered": False, "severity": "safe"},
+                        "sexual": {"filtered": False, "severity": "safe"},
+                        "violence": {"filtered": False, "severity": "safe"},
+                    },
+                }
+            ],
+        }
+
+    @staticmethod
+    def _tool_response(response_id, created, model, tool_call, prompt_tokens, completion_tokens):
+        return {
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call],
+                    },
+                    "finish_reason": "tool_calls",
                     "content_filter_results": {
                         "hate": {"filtered": False, "severity": "safe"},
                         "self_harm": {"filtered": False, "severity": "safe"},

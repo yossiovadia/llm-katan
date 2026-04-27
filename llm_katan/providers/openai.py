@@ -15,14 +15,16 @@ from pydantic import BaseModel, Field
 from llm_katan.model import SimulatedError
 
 from . import register_provider
-from .base import Provider
+from .base import Provider, content_to_text, generate_dummy_args, generate_tool_call_id
 
 logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list | None = None
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -31,6 +33,9 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     stream: bool | None = False
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
+    response_format: dict | None = None
 
 
 class OpenAIProvider(Provider):
@@ -38,7 +43,6 @@ class OpenAIProvider(Provider):
     auth_header = "Authorization"
 
     def _normalize_key(self, raw_value: str) -> str:
-        """Strip 'Bearer ' prefix from Authorization header."""
         if raw_value.startswith("Bearer "):
             return raw_value[7:]
         return raw_value
@@ -48,14 +52,12 @@ class OpenAIProvider(Provider):
         async def chat_completions(raw_request: Request):
             client_ip = raw_request.client.host if raw_request.client else "unknown"
 
-            # Auth check
             auth_err = self.check_auth(dict(raw_request.headers))
             if auth_err:
                 logger.warning("openai | %s | 401 | %s", client_ip, auth_err)
                 err_body = {"error": {"message": auth_err, "type": "invalid_request_error", "code": "invalid_api_key"}}
                 return JSONResponse(status_code=401, content=err_body)
 
-            # Parse and validate request
             try:
                 body = await raw_request.json()
             except Exception:
@@ -75,15 +77,15 @@ class OpenAIProvider(Provider):
                 )
 
             logger.info(
-                "openai | %s | model=%s messages=%d stream=%s max_tokens=%s temp=%s",
+                "openai | %s | model=%s messages=%d stream=%s tools=%s",
                 client_ip, request.model, len(request.messages),
-                request.stream, request.max_tokens, request.temperature,
+                request.stream, len(request.tools) if request.tools else 0,
             )
 
             metrics = app.state.metrics
             start_time = time.time()
 
-            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+            messages = [{"role": msg.role, "content": content_to_text(msg.content)} for msg in request.messages]
             max_tokens = request.max_tokens if request.max_tokens is not None else self.backend.config.max_tokens
             temperature = request.temperature if request.temperature is not None else self.backend.config.temperature
 
@@ -101,6 +103,24 @@ class OpenAIProvider(Provider):
             response_id = f"chatcmpl-{int(time.time() * 1000)}"
             created = int(time.time())
             model_name = self.backend.config.served_model_name
+            use_json = request.response_format and request.response_format.get("type") == "json_object"
+
+            if request.tools:
+                tool = request.tools[0]["function"]
+                tool_call = {
+                    "id": generate_tool_call_id(),
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "arguments": json.dumps(generate_dummy_args(tool.get("parameters"))),
+                    },
+                }
+                elapsed = time.time() - start_time
+                metrics.record(elapsed, prompt_tokens, completion_tokens)
+                return self._tool_response(response_id, created, model_name, tool_call, prompt_tokens, completion_tokens)
+
+            if use_json:
+                generated_text = json.dumps({"response": generated_text})
 
             if request.stream:
                 async def stream_response():
@@ -146,6 +166,32 @@ class OpenAIProvider(Provider):
                     "message": {"role": "assistant", "content": text},
                     "logprobs": None,
                     "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
+
+    @staticmethod
+    def _tool_response(response_id, created, model, tool_call, prompt_tokens, completion_tokens):
+        return {
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call],
+                    },
+                    "logprobs": None,
+                    "finish_reason": "tool_calls",
                 }
             ],
             "usage": {

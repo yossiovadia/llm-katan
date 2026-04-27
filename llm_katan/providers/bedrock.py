@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from llm_katan.model import SimulatedError
 
 from . import register_provider
-from .base import Provider
+from .base import Provider, generate_dummy_args
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,27 @@ def _bedrock_error(status_code: int, message: str) -> JSONResponse:
 
 
 def _extract_text_from_content(content: list) -> str:
-    """Extract text from Bedrock Converse content blocks."""
+    """Extract text from Bedrock Converse content blocks.
+
+    Handles text, image, toolUse, and toolResult blocks.
+    """
     parts = []
     for block in content:
-        if isinstance(block, dict) and "text" in block:
+        if not isinstance(block, dict):
+            continue
+        if "text" in block:
             parts.append(block["text"])
+        elif "image" in block:
+            fmt = block["image"].get("source", {}).get("format", "unknown")
+            parts.append(f"[image:{fmt}]")
+        elif "toolUse" in block:
+            name = block["toolUse"].get("name", "?")
+            parts.append(f"[toolUse:{name}]")
+        elif "toolResult" in block:
+            tr_content = block["toolResult"].get("content", [])
+            for tr_block in tr_content:
+                if isinstance(tr_block, dict) and "text" in tr_block:
+                    parts.append(tr_block["text"])
     return "\n".join(parts)
 
 
@@ -209,6 +225,23 @@ class BedrockProvider(Provider):
             logger.warning("bedrock converse | %s | %d | simulated: %s", client_ip, e.status_code, e.message)
             return _bedrock_error(e.status_code, e.message)
 
+        # Tool calling: if toolConfig is present, return a toolUse response
+        tool_config = body.get("toolConfig")
+        if tool_config:
+            tools = tool_config.get("tools", [])
+            if tools:
+                tool_spec = tools[0].get("toolSpec", {})
+                elapsed = time.time() - start_time
+                metrics.record(elapsed, prompt_tokens, completion_tokens)
+                logger.info(
+                    "bedrock converse | %s | 200 | tool_use=%s | %d tokens | %.3fs",
+                    client_ip, tool_spec.get("name", "?"),
+                    prompt_tokens + completion_tokens, elapsed,
+                )
+                return self._tool_converse_response(
+                    tool_spec, prompt_tokens, completion_tokens, elapsed,
+                )
+
         if stream:
             return StreamingResponse(
                 self._stream_converse(
@@ -236,6 +269,34 @@ class BedrockProvider(Provider):
                 }
             },
             "stopReason": "end_turn",
+            "usage": {
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+                "totalTokens": input_tokens + output_tokens,
+            },
+            "metrics": {
+                "latencyMs": int(latency_ms_float * 1000),
+            },
+        }
+
+    @staticmethod
+    def _tool_converse_response(tool_spec, input_tokens, output_tokens, latency_ms_float):
+        tool_name = tool_spec.get("name", "unknown_tool")
+        input_schema = tool_spec.get("inputSchema", {}).get("json", {})
+        return {
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "toolUse": {
+                            "toolUseId": f"tooluse_{uuid.uuid4().hex[:24]}",
+                            "name": tool_name,
+                            "input": generate_dummy_args(input_schema),
+                        }
+                    }],
+                }
+            },
+            "stopReason": "tool_use",
             "usage": {
                 "inputTokens": input_tokens,
                 "outputTokens": output_tokens,

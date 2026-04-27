@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from llm_katan.model import SimulatedError
 
 from . import register_provider
-from .base import Provider
+from .base import Provider, generate_dummy_args
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ class AnthropicMessagesRequest(BaseModel):
     stop_sequences: list[str] | None = None
     stream: bool | None = False
     metadata: dict | None = None
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
 
 
 def _anthropic_error(status_code: int, message: str) -> JSONResponse:
@@ -172,6 +174,21 @@ class AnthropicProvider(Provider):
             msg_id = f"msg_{uuid.uuid4().hex[:24]}"
             model_name = self.backend.config.served_model_name
 
+            if request.tools:
+                tool = request.tools[0]
+                tool_input = generate_dummy_args(tool.get("input_schema"))
+                elapsed = time.time() - start_time
+                metrics.record(elapsed, prompt_tokens, completion_tokens)
+                logger.info(
+                    "anthropic | %s | 200 | tool_use | %d tokens | %.3fs",
+                    client_ip, prompt_tokens + completion_tokens, elapsed,
+                )
+                return self._tool_response(
+                    msg_id, model_name, generated_text,
+                    tool["name"], tool_input,
+                    prompt_tokens, completion_tokens,
+                )
+
             if request.stream:
                 return StreamingResponse(
                     self._stream_response(
@@ -200,6 +217,30 @@ class AnthropicProvider(Provider):
             "content": [{"type": "text", "text": text}],
             "model": model,
             "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        }
+
+    @staticmethod
+    def _tool_response(msg_id, model, text, tool_name, tool_input, input_tokens, output_tokens):
+        return {
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": text},
+                {
+                    "type": "tool_use",
+                    "id": f"toolu_{uuid.uuid4().hex[:24]}",
+                    "name": tool_name,
+                    "input": tool_input,
+                },
+            ],
+            "model": model,
+            "stop_reason": "tool_use",
             "stop_sequence": None,
             "usage": {
                 "input_tokens": input_tokens,

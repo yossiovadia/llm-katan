@@ -4,11 +4,79 @@ Base provider class for llm-katan.
 Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 """
 
+import uuid
 from abc import ABC, abstractmethod
 
 from fastapi import FastAPI
 
 from llm_katan.model import ModelBackend
+
+
+def content_to_text(content) -> str:
+    """Normalize message content (string, array of blocks, or None) to plain text."""
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image_url":
+                    url = block.get("image_url", {}).get("url", "")
+                    if url.startswith("data:"):
+                        mime = url.split(";")[0].split(":", 1)[1] if ";" in url else "image"
+                        parts.append(f"[image:{mime}]")
+                    else:
+                        parts.append("[image:url]")
+                elif block.get("type") == "image":
+                    source = block.get("source", {})
+                    parts.append(f"[image:{source.get('media_type', 'unknown')}]")
+                elif block.get("type") == "tool_use":
+                    parts.append(f"[tool_use:{block.get('name', '?')}]")
+                elif block.get("type") == "tool_result":
+                    parts.append(block.get("content", str(block.get("output", ""))))
+                elif "text" in block:
+                    parts.append(block["text"])
+                elif "functionCall" in block:
+                    parts.append(f"[functionCall:{block['functionCall'].get('name', '?')}]")
+                elif "inlineData" in block:
+                    parts.append(f"[image:{block['inlineData'].get('mimeType', 'unknown')}]")
+        return " ".join(parts) if parts else ""
+    return str(content)
+
+
+def generate_tool_call_id() -> str:
+    return f"call_{uuid.uuid4().hex[:24]}"
+
+
+def generate_dummy_args(parameters: dict | None) -> dict:
+    """Generate minimal valid arguments from a JSON schema."""
+    if not parameters or not isinstance(parameters, dict):
+        return {}
+    props = parameters.get("properties", {})
+    result = {}
+    for name, schema in props.items():
+        typ = schema.get("type", "string")
+        if "enum" in schema:
+            result[name] = schema["enum"][0]
+        elif typ == "string":
+            result[name] = f"test_{name}"
+        elif typ == "integer":
+            result[name] = 1
+        elif typ == "number":
+            result[name] = 1.0
+        elif typ == "boolean":
+            result[name] = True
+        elif typ == "array":
+            result[name] = []
+        elif typ == "object":
+            result[name] = {}
+    return result
 
 
 class Provider(ABC):
