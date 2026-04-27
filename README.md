@@ -13,8 +13,11 @@ Katan means "small" in Hebrew.
 - **Streaming** — all providers support SSE streaming in their native format
 - **Live Dashboard** — real-time WebSocket-powered view of every request/response at `/dashboard`
 - **Prometheus Metrics** — request counts, token usage, latency at `/metrics`
+- **Tool Calling** — all providers accept tool definitions and return tool call responses in native format
+- **Multimodal** — image content blocks accepted across all providers (OpenAI image_url, Anthropic image, Vertex inlineData, Bedrock image)
+- **JSON Mode** — `response_format: {type: "json_object"}` returns valid JSON
 - **Failure Simulation** — inject errors, latency, timeouts, and rate limits for gateway resilience testing
-- **283+ Tests** — extensive coverage for every provider, format, and edge case
+- **313+ Tests** — extensive coverage for every provider, format, and edge case
 
 ## Quick Start
 
@@ -157,6 +160,74 @@ Failure Simulation (echo backend only):
   --timeout-after INTEGER       Return 504 after N successful requests (default: 0 = disabled)
   --rate-limit-after INTEGER    Return 429 after N requests (default: 0 = disabled)
 ```
+
+## Tool Calling
+
+When tools are included in a request, the simulator returns a tool call response using the first tool with dummy arguments generated from its parameter schema. This lets you test API translation pipelines that need to handle tool calling across providers.
+
+```bash
+# OpenAI — returns tool_calls with finish_reason: "tool_calls"
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "test",
+    "messages": [{"role": "user", "content": "What is the weather in SF?"}],
+    "tools": [{"type": "function", "function": {
+      "name": "get_weather",
+      "parameters": {"type": "object", "properties": {"location": {"type": "string"}}}
+    }}]
+  }'
+
+# Anthropic — returns content block with type: "tool_use", stop_reason: "tool_use"
+curl -X POST http://localhost:8000/v1/messages \
+  -H "x-api-key: test-key" -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "test", "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Weather in SF?"}],
+    "tools": [{"name": "get_weather", "input_schema": {
+      "type": "object", "properties": {"location": {"type": "string"}}
+    }}]
+  }'
+```
+
+Each provider uses its native tool calling format:
+
+| Provider | Request field | Response format | Stop reason |
+|----------|--------------|-----------------|-------------|
+| OpenAI | `tools[].function` | `message.tool_calls[]` | `tool_calls` |
+| Anthropic | `tools[].input_schema` | `content[{type: "tool_use"}]` | `tool_use` |
+| Vertex AI | `tools[].functionDeclarations` | `parts[{functionCall}]` | `STOP` |
+| Bedrock | `toolConfig.tools[].toolSpec` | `content[{toolUse}]` | `tool_use` |
+| Azure | `tools[].function` | `message.tool_calls[]` | `tool_calls` |
+
+Tool result messages (`role: "tool"` in OpenAI, `tool_result` blocks in Anthropic, `functionResponse` in Vertex, `toolResult` in Bedrock) are accepted in follow-up requests.
+
+## Multimodal
+
+Image content blocks are accepted in all providers. In echo mode, images are described as `[image:mime/type]` in the response without processing the actual image data.
+
+```bash
+# OpenAI — image_url content blocks
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "test",
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "What is in this image?"},
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR..."}}
+    ]}]
+  }'
+```
+
+| Provider | Image format | Echo output |
+|----------|-------------|-------------|
+| OpenAI / Azure | `{type: "image_url", image_url: {url}}` | `[image:image/png]` |
+| Anthropic | `{type: "image", source: {media_type, data}}` | `[image:image/png]` |
+| Vertex AI | `{inlineData: {mimeType, data}}` | `[image:image/jpeg]` |
+| Bedrock | `{image: {source: {format, bytes}}}` | `[image:png]` |
 
 ## Failure Simulation
 
