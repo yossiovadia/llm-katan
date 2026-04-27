@@ -242,6 +242,10 @@ class BedrockProvider(Provider):
                     tool_spec, prompt_tokens, completion_tokens, elapsed,
                 )
 
+        response_format = body.get("responseFormat") or body.get("response_format")
+        if response_format and response_format.get("type") == "json_object":
+            generated_text = json.dumps({"response": generated_text})
+
         if stream:
             return StreamingResponse(
                 self._stream_converse(

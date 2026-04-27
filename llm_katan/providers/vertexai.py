@@ -213,6 +213,12 @@ class VertexAIProvider(Provider):
                     completion_tokens,
                 )
 
+        response_format = gen_config.get("responseMimeType") or body.get("response_format", {})
+        if response_format == "application/json" or (
+            isinstance(response_format, dict) and response_format.get("type") == "json_object"
+        ):
+            generated_text = json.dumps({"response": generated_text})
+
         if stream:
             return StreamingResponse(
                 self._stream_response(

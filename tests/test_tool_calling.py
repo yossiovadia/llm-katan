@@ -288,6 +288,8 @@ class TestVertexAIToolCalling:
             headers={"Authorization": "Bearer test"},
         )
         assert resp.status_code == 200
+        assert "candidates" in resp.json()
+        assert "text" in resp.json()["candidates"][0]["content"]["parts"][0]
 
     async def test_no_tools_returns_text(self, client):
         resp = await client.post(
@@ -352,6 +354,8 @@ class TestBedrockToolCalling:
             headers=self._headers(),
         )
         assert resp.status_code == 200
+        assert resp.json()["stopReason"] == "end_turn"
+        assert "text" in resp.json()["output"]["message"]["content"][0]
 
     async def test_no_tools_returns_text(self, client):
         resp = await client.post(
@@ -408,3 +412,5 @@ class TestAzureToolCalling:
             headers={"api-key": "test"},
         )
         assert resp.json()["choices"][0]["finish_reason"] == "stop"
+        assert resp.json()["choices"][0]["message"]["content"] is not None
+        assert "hello" in resp.json()["choices"][0]["message"]["content"]

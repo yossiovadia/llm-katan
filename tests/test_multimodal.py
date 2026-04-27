@@ -1,5 +1,8 @@
-"""Tests for multimodal (image) content support across providers."""
+"""Tests for multimodal (image) content and JSON mode across providers."""
 
+import json
+
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
@@ -34,7 +37,10 @@ def make_app(providers):
     return app
 
 
-TINY_PNG_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+TINY_PNG_DATA_URI = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 
 # ── OpenAI multimodal ──
@@ -65,6 +71,7 @@ class TestOpenAIMultimodal:
         assert resp.status_code == 200
         content = resp.json()["choices"][0]["message"]["content"]
         assert "[image:image/png]" in content
+        assert "What is in this image?" in content
 
     async def test_mixed_text_and_image(self, client):
         resp = await client.post(
@@ -95,6 +102,8 @@ class TestOpenAIMultimodal:
             headers={"Authorization": "Bearer test"},
         )
         assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        assert "hello" in content
 
     async def test_null_content_accepted(self, client):
         resp = await client.post(
@@ -113,6 +122,7 @@ class TestOpenAIMultimodal:
             headers={"Authorization": "Bearer test"},
         )
         assert resp.status_code == 200
+        assert resp.json()["choices"][0]["finish_reason"] == "stop"
 
 
 # ── Anthropic multimodal ──
@@ -157,6 +167,8 @@ class TestAnthropicMultimodal:
             headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
         )
         assert resp.status_code == 200
+        text = resp.json()["content"][0]["text"]
+        assert "hello" in text
 
 
 # ── Vertex AI multimodal ──
@@ -194,6 +206,8 @@ class TestVertexAIMultimodal:
             headers={"Authorization": "Bearer test"},
         )
         assert resp.status_code == 200
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        assert "hello" in text
 
 
 # ── Bedrock multimodal ──
@@ -240,6 +254,8 @@ class TestBedrockMultimodal:
             headers=self._headers(),
         )
         assert resp.status_code == 200
+        text = resp.json()["output"]["message"]["content"][0]["text"]
+        assert "hello" in text
 
 
 # ── Azure OpenAI multimodal ──
@@ -271,7 +287,7 @@ class TestAzureMultimodal:
         assert "[image:image/png]" in content
 
 
-# ── JSON mode ──
+# ── JSON mode — all providers ──
 
 
 class TestJSONModeOpenAI:
@@ -282,7 +298,6 @@ class TestJSONModeOpenAI:
             yield c
 
     async def test_json_object_response(self, client):
-        import json
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -298,14 +313,13 @@ class TestJSONModeOpenAI:
         assert "response" in parsed
 
     async def test_no_response_format_returns_plain_text(self, client):
-        import json
         resp = await client.post(
             "/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
             headers={"Authorization": "Bearer test"},
         )
         content = resp.json()["choices"][0]["message"]["content"]
-        with __import__("pytest").raises(json.JSONDecodeError):
+        with pytest.raises(json.JSONDecodeError):
             json.loads(content)
 
 
@@ -317,7 +331,6 @@ class TestJSONModeAnthropic:
             yield c
 
     async def test_json_object_response(self, client):
-        import json
         resp = await client.post(
             "/v1/messages",
             json={
@@ -333,7 +346,6 @@ class TestJSONModeAnthropic:
         assert "response" in parsed
 
     async def test_no_response_format_returns_plain_text(self, client):
-        import json
         resp = await client.post(
             "/v1/messages",
             json={
@@ -343,7 +355,7 @@ class TestJSONModeAnthropic:
             headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},
         )
         text = resp.json()["content"][0]["text"]
-        with __import__("pytest").raises(json.JSONDecodeError):
+        with pytest.raises(json.JSONDecodeError):
             json.loads(text)
 
 
@@ -355,7 +367,6 @@ class TestJSONModeAzure:
             yield c
 
     async def test_json_object_response(self, client):
-        import json
         resp = await client.post(
             "/openai/deployments/gpt-4/chat/completions",
             json={
@@ -368,3 +379,90 @@ class TestJSONModeAzure:
         content = resp.json()["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         assert "response" in parsed
+
+
+class TestJSONModeVertexNative:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["vertexai"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    async def test_response_format_json_object(self, client):
+        resp = await client.post(
+            "/v1beta/models/gemini-pro:generateContent",
+            json={
+                "contents": [{"role": "user", "parts": [{"text": "give me json"}]}],
+                "response_format": {"type": "json_object"},
+            },
+            headers={"Authorization": "Bearer test"},
+        )
+        assert resp.status_code == 200
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        parsed = json.loads(text)
+        assert "response" in parsed
+
+    async def test_response_mime_type_json(self, client):
+        resp = await client.post(
+            "/v1beta/models/gemini-pro:generateContent",
+            json={
+                "contents": [{"role": "user", "parts": [{"text": "give me json"}]}],
+                "generationConfig": {"responseMimeType": "application/json"},
+            },
+            headers={"Authorization": "Bearer test"},
+        )
+        assert resp.status_code == 200
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        parsed = json.loads(text)
+        assert "response" in parsed
+
+    async def test_no_response_format_returns_plain_text(self, client):
+        resp = await client.post(
+            "/v1beta/models/gemini-pro:generateContent",
+            json={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+            headers={"Authorization": "Bearer test"},
+        )
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(text)
+
+
+class TestJSONModeBedrock:
+    @pytest_asyncio.fixture
+    async def client(self):
+        app = make_app(["bedrock"])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+    def _headers(self):
+        return {
+            "Authorization": (
+                "AWS4-HMAC-SHA256 Credential=AKID/20240101/us-east-1"
+                "/bedrock/aws4_request, SignedHeaders=host, Signature=abc"
+            ),
+            "x-amz-date": "20240101T000000Z",
+        }
+
+    async def test_response_format_json_object(self, client):
+        resp = await client.post(
+            "/model/anthropic.claude-v2/converse",
+            json={
+                "messages": [{"role": "user", "content": [{"text": "give me json"}]}],
+                "response_format": {"type": "json_object"},
+            },
+            headers=self._headers(),
+        )
+        assert resp.status_code == 200
+        text = resp.json()["output"]["message"]["content"][0]["text"]
+        parsed = json.loads(text)
+        assert "response" in parsed
+
+    async def test_no_response_format_returns_plain_text(self, client):
+        resp = await client.post(
+            "/model/anthropic.claude-v2/converse",
+            json={"messages": [{"role": "user", "content": [{"text": "hello"}]}]},
+            headers=self._headers(),
+        )
+        text = resp.json()["output"]["message"]["content"][0]["text"]
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(text)
