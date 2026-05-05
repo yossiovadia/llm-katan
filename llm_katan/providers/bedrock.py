@@ -94,14 +94,22 @@ class BedrockProvider(Provider):
     name = "bedrock"
     auth_header = "Authorization"
 
-    def _extract_sigv4_access_key(self, auth_value: str) -> str | None:
-        """Extract the access key ID from SigV4 Authorization header.
+    @staticmethod
+    def _parse_sigv4_credential(auth_value: str) -> dict | None:
+        """Parse SigV4 credential scope from Authorization header.
 
-        Format: AWS4-HMAC-SHA256 Credential=AKID/.../aws4_request, ...
+        Format: AWS4-HMAC-SHA256 Credential=AKID/DATE/REGION/SERVICE/aws4_request, ...
+        Returns dict with access_key, date, region, service, or None on parse failure.
         """
         try:
-            cred_part = auth_value.split("Credential=")[1].split(",")[0]
-            return cred_part.split("/")[0]
+            cred_part = auth_value.split("Credential=")[1].split(",")[0].strip()
+            parts = cred_part.split("/")
+            return {
+                "access_key": parts[0],
+                "date": parts[1] if len(parts) > 1 else None,
+                "region": parts[2] if len(parts) > 2 else None,
+                "service": parts[3] if len(parts) > 3 else None,
+            }
         except (IndexError, AttributeError):
             return None
 
@@ -140,10 +148,16 @@ class BedrockProvider(Provider):
         if auth_value.startswith("AWS4-HMAC-SHA256") and not has_security_token:
             logger.info("bedrock | x-amz-security-token not present (optional, only needed for temporary credentials)")
 
+        if auth_value.startswith("AWS4-HMAC-SHA256"):
+            cred = self._parse_sigv4_credential(auth_value)
+            if cred and cred["service"] and cred["service"] != "bedrock":
+                return f"SigV4 service must be 'bedrock', got '{cred['service']}'"
+
         # Key validation
         if self.expected_key is not None:
             if auth_value.startswith("AWS4-HMAC-SHA256"):
-                actual = self._extract_sigv4_access_key(auth_value)
+                cred = self._parse_sigv4_credential(auth_value)
+                actual = cred["access_key"] if cred else None
             else:
                 actual = auth_value[7:]  # strip "Bearer "
 
@@ -188,6 +202,12 @@ class BedrockProvider(Provider):
             logger.warning("bedrock | %s | 400 | invalid JSON", client_ip)
             return _bedrock_error(400, "Invalid JSON in request body")
 
+        # Parse SigV4 credential scope for echo metadata
+        auth_header = dict(raw_request.headers).get("authorization", "")
+        sigv4_cred = None
+        if auth_header.startswith("AWS4-HMAC-SHA256"):
+            sigv4_cred = self._parse_sigv4_credential(auth_header)
+
         messages = body.get("messages")
         if not messages or not isinstance(messages, list):
             logger.warning("bedrock | %s | 400 | missing messages", client_ip)
@@ -198,8 +218,9 @@ class BedrockProvider(Provider):
         temperature = inference_config.get("temperature", self.backend.config.temperature)
 
         logger.info(
-            "bedrock converse | %s | model=%s messages=%d stream=%s max_tokens=%s temp=%s",
+            "bedrock converse | %s | model=%s messages=%d stream=%s max_tokens=%s temp=%s region=%s",
             client_ip, model_id, len(messages), stream, max_tokens, temperature,
+            sigv4_cred.get("region") if sigv4_cred else "n/a",
         )
 
         metrics = app.state.metrics
@@ -260,12 +281,12 @@ class BedrockProvider(Provider):
         metrics.record(elapsed, prompt_tokens, completion_tokens)
         logger.info("bedrock converse | %s | 200 | %d tokens | %.3fs", client_ip, prompt_tokens + completion_tokens, elapsed)
 
-        resp_body = self._converse_response(generated_text, prompt_tokens, completion_tokens, elapsed)
+        resp_body = self._converse_response(generated_text, prompt_tokens, completion_tokens, elapsed, sigv4_cred)
         return resp_body
 
     @staticmethod
-    def _converse_response(text, input_tokens, output_tokens, latency_ms_float):
-        return {
+    def _converse_response(text, input_tokens, output_tokens, latency_ms_float, sigv4_cred=None):
+        resp = {
             "output": {
                 "message": {
                     "role": "assistant",
@@ -282,6 +303,9 @@ class BedrockProvider(Provider):
                 "latencyMs": int(latency_ms_float * 1000),
             },
         }
+        if sigv4_cred:
+            resp["_sigv4"] = {k: v for k, v in sigv4_cred.items() if v is not None}
+        return resp
 
     @staticmethod
     def _tool_converse_response(tool_spec, input_tokens, output_tokens, latency_ms_float):

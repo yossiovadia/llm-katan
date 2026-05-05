@@ -960,3 +960,79 @@ class TestErrorFormat:
             headers=bedrock_headers(),
         )
         assert resp.status_code == 400
+
+
+# ============================================================
+# SigV4 Credential Scope Validation
+# ============================================================
+
+class TestSigV4CredentialScope:
+    @pytest.mark.asyncio
+    async def test_wrong_service_rejected(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": (
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260505/us-east-1/s3/aws4_request,"
+                    " SignedHeaders=host;x-amz-date, Signature=abc"
+                ),
+                "x-amz-date": "20260505T000000Z",
+            },
+        )
+        assert resp.status_code == 401
+        assert "bedrock" in resp.json()["message"]
+        assert "s3" in resp.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_sigv4_region_echoed_in_response(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": (
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260505/eu-west-1/bedrock/aws4_request,"
+                    " SignedHeaders=host;x-amz-date, Signature=abc"
+                ),
+                "x-amz-date": "20260505T000000Z",
+            },
+        )
+        assert resp.status_code == 200
+        sigv4 = resp.json()["_sigv4"]
+        assert sigv4["region"] == "eu-west-1"
+        assert sigv4["service"] == "bedrock"
+        assert sigv4["access_key"] == "AKID"
+
+    @pytest.mark.asyncio
+    async def test_bearer_auth_no_sigv4_in_response(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer some-token",
+            },
+        )
+        assert resp.status_code == 200
+        assert "_sigv4" not in resp.json()
+
+    @pytest.mark.asyncio
+    async def test_sigv4_date_echoed(self, client):
+        resp = await client.post(
+            "/model/test/converse",
+            json=converse_request(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": (
+                    "AWS4-HMAC-SHA256 Credential=TESTKEY/20260505/us-west-2/bedrock/aws4_request,"
+                    " SignedHeaders=host;x-amz-date, Signature=abc"
+                ),
+                "x-amz-date": "20260505T000000Z",
+            },
+        )
+        assert resp.status_code == 200
+        sigv4 = resp.json()["_sigv4"]
+        assert sigv4["date"] == "20260505"
+        assert sigv4["region"] == "us-west-2"
