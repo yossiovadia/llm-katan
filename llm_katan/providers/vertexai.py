@@ -126,6 +126,15 @@ class VertexAIProvider(Provider):
         async def stream_generate_content_v1(model: str, raw_request: Request):
             return await self._handle_request(model, raw_request, app, stream=True)
 
+        # Full project path: /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:*
+        @app.post("/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent")
+        async def generate_content_full_path(project: str, location: str, model: str, raw_request: Request):
+            return await self._handle_request(model, raw_request, app, stream=False)
+
+        @app.post("/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:streamGenerateContent")
+        async def stream_generate_content_full_path(project: str, location: str, model: str, raw_request: Request):
+            return await self._handle_request(model, raw_request, app, stream=True)
+
         # OpenAI-compatible Vertex AI endpoint
         @app.post("/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions")
         async def vertex_openai_compat(project: str, location: str, endpoint: str, raw_request: Request):

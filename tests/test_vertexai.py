@@ -452,3 +452,28 @@ class TestErrorFormat:
         )
         assert resp.status_code == 401
         assert resp.json()["error"]["status"] == "UNAUTHENTICATED"
+
+
+# ============================================================
+# Full Project Path Routes
+# ============================================================
+
+class TestFullProjectPath:
+    @pytest.mark.asyncio
+    async def test_generate_content_full_path(self, client):
+        resp = await client.post(
+            "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-pro:generateContent",
+            json=base_request(),
+            headers=gemini_headers(),
+        )
+        assert resp.status_code == 200
+        assert "candidates" in resp.json()
+
+    @pytest.mark.asyncio
+    async def test_stream_generate_content_full_path(self, client):
+        resp = await client.post(
+            "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-pro:streamGenerateContent",
+            json=base_request(),
+            headers=gemini_headers(),
+        )
+        assert resp.status_code == 200

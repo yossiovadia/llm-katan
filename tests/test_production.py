@@ -418,7 +418,7 @@ class TestMetrics:
         assert "# TYPE" in text
         assert "llm_katan_requests_total" in text
         assert 'model="gpt-test"' in text
-        assert resp.headers["content-type"] == "text/plain; charset=utf-8"
+        assert resp.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
 
     def test_metrics_bounded_deque(self):
         """Verify response_times doesn't grow unbounded."""

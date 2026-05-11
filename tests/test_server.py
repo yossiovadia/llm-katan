@@ -149,6 +149,13 @@ async def test_metrics(client):
 
 
 @pytest.mark.asyncio
+async def test_metrics_content_type_prometheus(client):
+    resp = await client.get("/metrics")
+    assert "text/plain" in resp.headers["content-type"]
+    assert "version=0.0.4" in resp.headers["content-type"]
+
+
+@pytest.mark.asyncio
 async def test_missing_auth_rejected(client):
     resp = await client.post(
         "/v1/chat/completions",

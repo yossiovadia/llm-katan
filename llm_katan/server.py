@@ -264,7 +264,7 @@ def create_app(config: ServerConfig) -> FastAPI:
                 f'llm_katan_lifetime_provider_requests_total{{provider="{prov}"}} {count}\n'
             )
 
-        return PlainTextResponse(content=text, media_type="text/plain")
+        return PlainTextResponse(content=text, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.get("/stats")
     async def get_stats():
