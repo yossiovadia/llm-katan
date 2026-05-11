@@ -117,6 +117,26 @@ async def test_chat_completion_streaming(client):
 
 
 @pytest.mark.asyncio
+async def test_streaming_first_chunk_has_role(client):
+    import json
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-test", "messages": [{"role": "user", "content": "hello"}], "stream": True},
+        headers=openai_headers(),
+    )
+    lines = resp.text.strip().split("\n")
+    first_data = None
+    for line in lines:
+        if line.startswith("data: ") and line != "data: [DONE]":
+            first_data = json.loads(line[6:])
+            break
+    assert first_data is not None
+    delta = first_data["choices"][0]["delta"]
+    assert "role" in delta, "First streaming chunk must include role: assistant"
+    assert delta["role"] == "assistant"
+
+
+@pytest.mark.asyncio
 async def test_metrics(client):
     await client.post(
         "/v1/chat/completions",

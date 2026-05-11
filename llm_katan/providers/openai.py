@@ -124,6 +124,13 @@ class OpenAIProvider(Provider):
 
             if request.stream:
                 async def stream_response():
+                    role_chunk = {
+                        "id": response_id, "object": "chat.completion.chunk",
+                        "created": created, "model": model_name,
+                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "logprobs": None, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(role_chunk)}\n\n"
+
                     chunk_size = 4
                     for i in range(0, len(generated_text), chunk_size):
                         chunk_text = generated_text[i: i + chunk_size]
