@@ -397,3 +397,101 @@ class TestChunkDelay:
             elapsed = time.time() - start
             assert resp.status_code == 200
             assert elapsed < 0.2
+
+
+# --- TTFT and ITL simulation (#24) ---
+
+
+class TestTTFT:
+    async def test_ttft_delays_first_chunk(self):
+        import time
+        app = make_app(ttft_ms=300)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            assert elapsed >= 0.25, f"TTFT should add ~300ms, got {elapsed*1000:.0f}ms"
+
+    async def test_ttft_zero_is_fast(self):
+        import time
+        app = make_app(ttft_ms=0)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert elapsed < 0.2
+
+    async def test_ttft_applies_to_non_streaming(self):
+        import time
+        app = make_app(ttft_ms=300)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json=openai_body(),
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            assert elapsed >= 0.25
+
+
+class TestITL:
+    async def test_itl_delays_between_chunks(self):
+        import time
+        app = make_app(itl_ms=100)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            # Echo produces several chunks, each delayed 100ms
+            assert elapsed >= 0.3, f"ITL should add significant delay, got {elapsed*1000:.0f}ms"
+
+    async def test_itl_no_effect_on_non_streaming(self):
+        import time
+        app = make_app(itl_ms=500)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json=openai_body(),
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            assert elapsed < 0.3, f"ITL should not affect non-streaming, got {elapsed*1000:.0f}ms"
+
+    async def test_ttft_and_itl_combined(self):
+        import time
+        app = make_app(ttft_ms=200, itl_ms=50)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            start = time.time()
+            resp = await c.post(
+                "/v1/chat/completions",
+                json={**openai_body(), "stream": True},
+                headers=openai_headers(),
+            )
+            elapsed = time.time() - start
+            assert resp.status_code == 200
+            # 200ms TTFT + several chunks * 50ms each
+            assert elapsed >= 0.35

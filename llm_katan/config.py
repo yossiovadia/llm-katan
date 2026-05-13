@@ -45,6 +45,8 @@ class ServerConfig:
     rate_limit_after: int = 0
     max_inflight: int = 0
     chunk_delay_ms: int = 0
+    ttft_ms: int = 0
+    itl_ms: int = 0
 
     def __post_init__(self):
         # Environment variable overrides (before served_model_name defaulting)

@@ -305,6 +305,9 @@ class EchoBackend(ModelBackend):
         if self.config.latency_ms > 0:
             await asyncio.sleep(self.config.latency_ms / 1000.0)
 
+        if self.config.ttft_ms > 0:
+            await asyncio.sleep(self.config.ttft_ms / 1000.0)
+
         from datetime import datetime, timezone
 
         user_msg = ""

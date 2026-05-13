@@ -130,13 +130,19 @@ class OpenAIProvider(Provider):
                         "created": created, "model": model_name,
                         "choices": [{"index": 0, "delta": {"role": "assistant"}, "logprobs": None, "finish_reason": None}],
                     }
+                    ttft = self.backend.config.ttft_ms / 1000.0 if self.backend.config.ttft_ms > 0 else 0
+                    itl = self.backend.config.itl_ms / 1000.0 if self.backend.config.itl_ms > 0 else 0
+                    chunk_delay = self.backend.config.chunk_delay_ms / 1000.0 if self.backend.config.chunk_delay_ms > 0 else 0
+
+                    if ttft > 0:
+                        await asyncio.sleep(ttft)
                     yield f"data: {json.dumps(role_chunk)}\n\n"
 
-                    chunk_delay = self.backend.config.chunk_delay_ms / 1000.0 if self.backend.config.chunk_delay_ms > 0 else 0
                     chunk_size = 4
                     for i in range(0, len(generated_text), chunk_size):
-                        if chunk_delay > 0:
-                            await asyncio.sleep(chunk_delay)
+                        delay = itl or chunk_delay
+                        if delay > 0:
+                            await asyncio.sleep(delay)
                         chunk_text = generated_text[i: i + chunk_size]
                         yield f"data: {json.dumps(self._stream_chunk(response_id, created, model_name, chunk_text))}\n\n"
 

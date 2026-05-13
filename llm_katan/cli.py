@@ -138,6 +138,16 @@ logger = logging.getLogger(__name__)
     default=0, type=int,
     help="Delay in ms between SSE streaming chunks. Echo backend only. (default: 0)",
 )
+@click.option(
+    "--ttft-ms",
+    default=0, type=int,
+    help="Time to First Token in ms. Delays before first chunk. Echo backend only. (default: 0)",
+)
+@click.option(
+    "--itl-ms",
+    default=0, type=int,
+    help="Inter-Token Latency in ms. Delays between streaming chunks. Echo backend only. (default: 0)",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -164,6 +174,8 @@ def main(
     rate_limit_after: int,
     max_inflight: int,
     chunk_delay_ms: int,
+    ttft_ms: int,
+    itl_ms: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -228,6 +240,8 @@ def main(
         rate_limit_after=rate_limit_after,
         max_inflight=max_inflight,
         chunk_delay_ms=chunk_delay_ms,
+        ttft_ms=ttft_ms,
+        itl_ms=itl_ms,
     )
 
     protocol = "https" if config.tls else "http"
@@ -249,6 +263,7 @@ def main(
     has_failures = (
         config.error_rate > 0 or config.latency_ms > 0 or config.timeout_after > 0
         or config.rate_limit_after > 0 or config.max_inflight > 0 or config.chunk_delay_ms > 0
+        or config.ttft_ms > 0 or config.itl_ms > 0
     )
     if has_failures:
         parts = []
@@ -264,6 +279,10 @@ def main(
             parts.append(f"max_inflight={config.max_inflight}")
         if config.chunk_delay_ms > 0:
             parts.append(f"chunk_delay={config.chunk_delay_ms}ms")
+        if config.ttft_ms > 0:
+            parts.append(f"ttft={config.ttft_ms}ms")
+        if config.itl_ms > 0:
+            parts.append(f"itl={config.itl_ms}ms")
         click.echo(f"  Failures:  {', '.join(parts)}")
     click.echo(f"  Stats:     {config.stats_file}")
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
