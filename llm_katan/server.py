@@ -140,6 +140,9 @@ class DashboardMiddleware(BaseHTTPMiddleware):
         start = time.time()
         response = await call_next(request)
         elapsed = time.time() - start
+        # Skip streaming requests, otherwise large TTFT latencies occur
+        if response.headers.get("content-type", "").startswith("text/event-stream"):
+            return response
 
         # Capture response body
         resp_body = None
