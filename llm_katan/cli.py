@@ -153,6 +153,12 @@ logger = logging.getLogger(__name__)
     default="",
     help="Comma-separated providers that skip auto tool_use responses (e.g., 'anthropic').",
 )
+@click.option(
+    "--disable-dashboard",
+    is_flag=True,
+    default=False,
+    help="Disable HTML dashboard, may be useful to increase performance"
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -182,6 +188,7 @@ def main(
     ttft_ms: int,
     itl_ms: int,
     no_auto_tool_providers: str,
+    disable_dashboard: bool,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -249,6 +256,7 @@ def main(
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
         no_auto_tool_providers=[p.strip() for p in no_auto_tool_providers.split(",") if p.strip()],
+        dashboard_enabled=not disable_dashboard
     )
 
     protocol = "https" if config.tls else "http"

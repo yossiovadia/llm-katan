@@ -48,6 +48,7 @@ class ServerConfig:
     ttft_ms: int = 0
     itl_ms: int = 0
     no_auto_tool_providers: list[str] = field(default_factory=list)
+    dashboard_enabled: bool = True
 
     def __post_init__(self):
         # Environment variable overrides (before served_model_name defaulting)
