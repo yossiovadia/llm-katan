@@ -1,0 +1,10 @@
+__pycache__
+.git
+dist/
+*.egg-info
+.*cache*
+.github
+tests
+scripts
+k8s
+CLAUDE.md
