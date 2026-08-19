@@ -49,6 +49,7 @@ class ServerConfig:
     itl_ms: int = 0
     no_auto_tool_providers: list[str] = field(default_factory=list)
     dashboard_enabled: bool = True
+    workers: int = 1
 
     def __post_init__(self):
         # Environment variable overrides (before served_model_name defaulting)

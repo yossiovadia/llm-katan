@@ -158,6 +158,8 @@ Optional:
   --api-keys TEXT               Override keys: openai=mykey,anthropic=mykey2
   --stats-file PATH             Persistent stats file (default: ~/.llm-katan/stats.json)
   --no-auto-tool-providers TEXT  Comma-separated providers that skip auto tool responses
+  --workers, -w INTEGER          Number of uvicorn worker processes (default: 1)
+  --disable-dashboard            Disable HTML dashboard (required with --workers > 1)
   --log-level [debug|info|warning|error]  Log level (default: INFO)
 
 Failure Simulation (echo backend only):

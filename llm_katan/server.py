@@ -8,6 +8,7 @@ Signed-off-by: Yossi Ovadia <yovadia@redhat.com>
 
 import json
 import logging
+import os
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -28,7 +29,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.21.0"
+    __version__ = "0.22.0"
 
 logger = logging.getLogger(__name__)
 
@@ -383,8 +384,59 @@ def _generate_self_signed_cert():
     return certfile.name, keyfile.name
 
 
+_worker_config: ServerConfig | None = None
+
+
+def _create_worker_app():
+    """Factory for uvicorn multiworker mode — reads config from env."""
+    global _worker_config
+    if _worker_config is None:
+        import json as _json
+        config_json = os.environ.get("_LLM_KATAN_WORKER_CONFIG")
+        if not config_json:
+            raise RuntimeError("Worker config not found in environment")
+        _worker_config = ServerConfig(**_json.loads(config_json))
+    return create_app(_worker_config)
+
+
+def run_server_multiworker(config: ServerConfig):
+    """Run the server with multiple uvicorn worker processes."""
+    from dataclasses import asdict
+
+    import uvicorn
+
+    ssl_kwargs = {}
+    if config.tls:
+        if config.tls_cert and config.tls_key:
+            ssl_kwargs = {"ssl_certfile": config.tls_cert, "ssl_keyfile": config.tls_key}
+            logger.info("TLS enabled (cert: %s)", config.tls_cert)
+        else:
+            certfile, keyfile = _generate_self_signed_cert()
+            ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
+            logger.info("TLS enabled (self-signed certificate)")
+
+    protocol = "https" if config.tls else "http"
+    logger.info("Server URL: %s://%s:%d (%d workers)", protocol, config.host, config.port, config.workers)
+    logger.warning(
+        "Multi-worker mode: /metrics and /stats are per-worker. "
+        "Failure simulation counters (--timeout-after, --rate-limit-after, --max-inflight) "
+        "won't coordinate across workers."
+    )
+
+    os.environ["_LLM_KATAN_WORKER_CONFIG"] = json.dumps(asdict(config))
+    uvicorn.run(
+        "llm_katan.server:_create_worker_app",
+        factory=True,
+        host=config.host,
+        port=config.port,
+        workers=config.workers,
+        log_level="info",
+        **ssl_kwargs,
+    )
+
+
 async def run_server(config: ServerConfig):
-    """Run the server with uvicorn."""
+    """Run the server with uvicorn (single worker)."""
     import uvicorn
 
     app = create_app(config)

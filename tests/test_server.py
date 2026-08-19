@@ -179,3 +179,34 @@ async def test_empty_messages_rejected(client):
         headers=openai_headers(),
     )
     assert resp.status_code == 400
+
+
+class TestWorkersConfig:
+    def test_workers_defaults_to_one(self):
+        config = ServerConfig(model_name="test")
+        assert config.workers == 1
+
+    def test_workers_config_accepts_value(self):
+        config = ServerConfig(model_name="test", workers=4)
+        assert config.workers == 4
+
+    def test_worker_app_factory(self):
+        import json
+        import os
+        from dataclasses import asdict
+        from llm_katan.server import _create_worker_app
+
+        config = ServerConfig(
+            model_name="test", served_model_name="test",
+            backend="echo", providers=["openai"],
+        )
+        os.environ["_LLM_KATAN_WORKER_CONFIG"] = json.dumps(asdict(config))
+        try:
+            import llm_katan.server as srv
+            srv._worker_config = None
+            app = _create_worker_app()
+            assert app is not None
+            assert app.state.config.model_name == "test"
+        finally:
+            del os.environ["_LLM_KATAN_WORKER_CONFIG"]
+            srv._worker_config = None

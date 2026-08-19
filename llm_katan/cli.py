@@ -19,7 +19,7 @@ try:
 
     __version__ = version("llm-katan")
 except PackageNotFoundError:
-    __version__ = "0.21.0"
+    __version__ = "0.22.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -159,6 +159,11 @@ logger = logging.getLogger(__name__)
     default=False,
     help="Disable HTML dashboard, may be useful to increase performance"
 )
+@click.option(
+    "--workers", "-w",
+    default=1, type=int,
+    help="Number of uvicorn worker processes (default: 1). >1 bypasses the GIL under high load.",
+)
 @click.version_option(version=__version__, prog_name="llm-katan")
 def main(
     model: str,
@@ -189,6 +194,7 @@ def main(
     itl_ms: int,
     no_auto_tool_providers: str,
     disable_dashboard: bool,
+    workers: int,
 ):
     """LLM Katan - One tiny model, every LLM API.
 
@@ -256,7 +262,8 @@ def main(
         ttft_ms=ttft_ms,
         itl_ms=itl_ms,
         no_auto_tool_providers=[p.strip() for p in no_auto_tool_providers.split(",") if p.strip()],
-        dashboard_enabled=not disable_dashboard
+        dashboard_enabled=not disable_dashboard,
+        workers=workers,
     )
 
     protocol = "https" if config.tls else "http"
@@ -267,6 +274,8 @@ def main(
     click.echo(f"  Device:    {config.device_auto}")
     if config.device_auto == "cpu":
         click.echo(f"  Quantize:  {'enabled' if config.quantize else 'disabled'}")
+    if config.workers > 1:
+        click.echo(f"  Workers:   {config.workers}")
     click.echo(f"  Providers: {', '.join(config.providers)}")
     if config.tls:
         if config.tls_cert:
@@ -303,6 +312,14 @@ def main(
     click.echo(f"  Server:    {protocol}://{config.host}:{config.port}")
     click.echo()
 
+    if config.workers > 1 and config.dashboard_enabled:
+        click.echo(
+            "Error: --workers > 1 requires --disable-dashboard "
+            "(dashboard state is per-process and won't aggregate across workers)",
+            err=True,
+        )
+        sys.exit(1)
+
     if config.backend != "echo":
         if config.backend == "vllm":
             try:
@@ -319,7 +336,11 @@ def main(
             sys.exit(1)
 
     try:
-        asyncio.run(run_server(config))
+        if config.workers > 1:
+            from .server import run_server_multiworker
+            run_server_multiworker(config)
+        else:
+            asyncio.run(run_server(config))
     except KeyboardInterrupt:
         click.echo("\nServer stopped")
     except Exception as e:
