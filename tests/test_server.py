@@ -194,6 +194,7 @@ class TestWorkersConfig:
         import json
         import os
         from dataclasses import asdict
+
         from llm_katan.server import _create_worker_app
 
         config = ServerConfig(
