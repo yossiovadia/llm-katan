@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: quay.io
-  IMAGE_NAME: yossiovadia/llm-katan
+  IMAGE_NAME: jabadia/llm-katan
   RELEASE_TAG: ${{ github.ref_name }}
 
 jobs:
